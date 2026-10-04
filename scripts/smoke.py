@@ -18,7 +18,7 @@ import uuid
 
 import httpx
 
-ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "admin-secret-token")
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "admin-secret-token-change-in-prod")
 
 
 def run_smoke(base_url: str):

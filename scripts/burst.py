@@ -52,6 +52,9 @@ def print_stats_table(title: str, stats: Dict[str, any]):
     if stats["decline_reasons"]:
         reasons_str = ", ".join(f"{k}: {v}" for k, v in stats["decline_reasons"].items())
         print(f"409 Breakdown  : {reasons_str}")
+    if stats.get("other", 0) > 0 and "status_counts" in stats:
+        other_counts = {k: v for k, v in stats["status_counts"].items() if k not in (200, 201, 409, 422, 429) and not (500 <= k <= 599)}
+        print(f"Other Breakdown: {other_counts}")
     print(
         f"Latencies (ms) : p50={stats['p50']:.1f}ms | "
         f"p95={stats['p95']:.1f}ms | "
@@ -125,6 +128,7 @@ async def execute_burst(
 
     return {
         "total": len(requests),
+        "status_counts": status_counts,
         "duration_s": duration,
         "rps": len(requests) / duration,
         "status_201": status_counts.get(201, 0),
