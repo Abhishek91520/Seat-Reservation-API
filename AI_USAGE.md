@@ -133,3 +133,20 @@ This document records the interaction log, human directions, and agent-implement
     - Observability test suite: 5/5 passed.
     - All unit + integration tests: 30/30 passed.
     - Sample log line verified.
+
+### Phase 6: Chaos and Failure-Injection Environment
+- **Human Input**: Directed to implement Prompt 6 (Chaos tests, failure injection, recovery verification).
+- **Agent Actions**:
+  - Implemented `tests/chaos/helpers.py`: Docker daemon detection and process environment utilities.
+  - Implemented 6 chaos test scenarios in `tests/chaos/`:
+    - `test_db_down.py`: stops DB / drops connectivity; verifies `/healthz` stays 200, `/readyz` fails closed with 503, `POST /reservations` returns clean JSON 503 (`database_unavailable`), and verifies automatic reconnection of the pool within 10s upon DB recovery.
+    - `test_app_kill.py`: simulates SIGKILL mid-burst across 1,000 tasks, aborting in-flight transactions abruptly; verifies ACID atomicity and strict database invariants on restart (zero partial reservations).
+    - `test_postgres_restart.py`: simulates PostgreSQL server restart / connection severance mid-burst; verifies recovery, zero phantom seats, and strict invariant hold.
+    - `test_cold_start.py`: measures elapsed time from cold start to `/healthz` (< 250ms) and to `/readyz` (< 850ms).
+    - `test_pgbouncer.py`: verifies transaction-mode PgBouncer compatibility (raw SQL transaction-level scoping with `SET LOCAL`).
+    - `test_prodlike.py`: executes resource-constrained stampede test (1,000 requests, Zipf distribution); verifies zero 5xx errors and measures p50/p95/p99 latency percentiles.
+  - Created `docs/perf-notes.md`: documented benchmark throughput, latency percentiles across concurrency scenarios, prodlike container profile, and recovery timings.
+  - Validation Gate:
+    - Ruff lint and format: 100% clean.
+    - Chaos test suite: 6/6 passed in 20.13s.
+    - Performance numbers recorded in `docs/perf-notes.md`.
