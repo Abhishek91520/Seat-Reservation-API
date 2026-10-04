@@ -16,7 +16,7 @@ A production-grade, highly observable seat reservation service built to remain s
 | **Show State** | `GET /shows/{id}` | Atomic snapshot of show availability and seat map |
 | **Auth Token** | `POST /auth/token` | Mints signed HS256 JWT for testing |
 | **Create Show** | `POST /shows` | Admin endpoint to create show and initialize seats |
-| **Reserve Seats** | `POST /reservations` | Reserve 1 to N seats with idempotency key |
+| **Reserve Seats** | `POST /reservations` or `POST /shows/{id}/reserve` | Reserve 1 to N seats with idempotency key |
 | **Cancel Booking** | `POST /reservations/{id}/cancel` | Cancel an active reservation |
 | **Live Dashboard** | `GET /live?show=<id>` | Real-time seat allocation grid visualizer |
 

@@ -259,3 +259,13 @@ This document records the interaction log, human directions, and agent-implement
   - Registered `HTTPBearer` in OpenAPI components so Swagger UI provides the standard Authorize modal and automatically formats/injects Bearer tokens.
   - Verified 100% passing tests and OpenAPI schema compliance.
 
+### Phase 12: Paytm Money Assignment Alignment & POST /shows/{id}/reserve Route
+- **Human Input**: Provided the complete Paytm Money take-home assignment specification for full compliance verification.
+- **Agent Actions**:
+  - Audited all functional requirements against implementation:
+    - Verified integer paise money math across all models and DB schemas.
+    - Verified single-transaction row locking, zero 5xx guarantee, and exact invariant reconciliation.
+    - Implemented explicit `POST /shows/{show_id}/reserve` route alongside `POST /reservations` for 100% spec parity.
+    - Updated reservation response payload to return both `"id"` and `"reservation_id"`.
+    - Added integration test `test_reserve_via_shows_endpoint` and verified 100% test pass.
+    - Updated [README.md](file:///c:/Users/abhis/Desktop/TP/paytm%20task/README.md) documentation.

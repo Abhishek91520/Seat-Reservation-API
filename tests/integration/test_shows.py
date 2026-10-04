@@ -135,3 +135,34 @@ async def test_get_nonexistent_show_returns_404(client: AsyncClient):
     assert malformed_response.status_code == 404
     data = malformed_response.json()
     assert data["error"]["code"] == "not_found"
+
+
+@pytest.mark.integration
+async def test_reserve_via_shows_endpoint(client: AsyncClient, db_conn):
+    # 1. Create show
+    resp = await client.post(
+        "/shows",
+        json={"name": "Reserve Path Show", "price_paise": 25000, "seats": ["A1", "A2"]},
+        headers={"Authorization": f"Bearer {settings.admin_token}"},
+    )
+    assert resp.status_code == 201
+    show_id = resp.json()["id"]
+
+    # 2. Get user token
+    token_resp = await client.post("/auth/token", json={"user_id": "test_user_shows_reserve"})
+    token = token_resp.json()["access_token"]
+
+    # 3. Reserve via POST /shows/{id}/reserve
+    reserve_resp = await client.post(
+        f"/shows/{show_id}/reserve",
+        json={"seats": ["A1"], "idempotency_key": "show-reserve-key-1"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert reserve_resp.status_code == 201
+    res_data = reserve_resp.json()
+    assert res_data["show_id"] == show_id
+    assert res_data["status"] == "confirmed"
+    assert res_data["seats"] == ["A1"]
+    assert "reservation_id" in res_data
+    assert "id" in res_data
+    await assert_invariants(db_conn, show_id)

@@ -278,6 +278,7 @@ async def reserve_seats(
 
         response_body = {
             "id": str(reservation_id),
+            "reservation_id": str(reservation_id),
             "show_id": str(show_uuid),
             "user_id": user_id,
             "seats": sorted_labels,
