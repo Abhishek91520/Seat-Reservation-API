@@ -59,4 +59,4 @@ reconcile:
 	$(PYTHON) scripts/reconcile.py $(BASE_URL)
 
 smoke:
-	$(PYTHON) -c "import httpx; r = httpx.get('$(BASE_URL)/readyz', timeout=5.0); assert r.status_code == 200, f'Smoke check failed: {r.status_code}'; print('Smoke check OK: 200')"
+	$(PYTHON) scripts/smoke.py $(BASE_URL)

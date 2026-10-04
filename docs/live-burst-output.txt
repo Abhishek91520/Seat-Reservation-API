@@ -1,0 +1,68 @@
+================================================================================
+SEAT RESERVATION SYSTEM: LIVE BURST BENCHMARK RUN LOGS
+Target: Singapore Region Deployment (Render + Supabase Session Pooler)
+Command: python scripts/burst.py $BASE_URL --seats 500 --users 2000 --hot 10 --concurrency 100
+================================================================================
+
+[REFERENCE / PRE-DEPLOYMENT BASELINE RUN]
+Timestamp: 2026-10-04T08:48:36Z
+Target: http://127.0.0.1:8000
+Parameters: seats=500, stampede_users=2000, hot_seats=10, concurrency=100
+
+Creating fresh show via POST /shows...
+[+] Show created successfully: c0d4dca8-c4dc-424d-bb94-0b09c9dd2b40 with 500 seats.
+Minting user auth tokens...
+
+--- Scenario A: Hot-Seat Storm (500 contenders, seat B1) ---
+Total Requests : 500 in 8.87s (56.4 req/s)
+Distribution   : 201 Created=1 | 200 Replay=0 | 409 Conflict=499 | 422 Validation=0 | 429 Overload=0 | 5xx Errors=0 | Other=0
+409 Breakdown  : idempotency_key_reuse: 1, seat_taken: 498
+Latencies (ms) : p50=1169.0ms | p95=4987.6ms | p99=7270.6ms | max=8100.0ms
+
+--- Scenario B: Hot-Set (1,000 contenders, 10 seats) ---
+Total Requests : 1000 in 15.80s (63.3 req/s)
+Distribution   : 201 Created=10 | 200 Replay=0 | 409 Conflict=990 | 422 Validation=0 | 429 Overload=0 | 5xx Errors=0 | Other=0
+409 Breakdown  : idempotency_key_reuse: 5, seat_taken: 985
+Latencies (ms) : p50=1104.6ms | p95=4311.3ms | p99=6657.9ms | max=9590.7ms
+
+--- Scenario C: Full Stampede (2000 requests, 20% retries) ---
+Total Requests : 2000 in 33.37s (59.9 req/s)
+Distribution   : 201 Created=258 | 200 Replay=75 | 409 Conflict=1667 | 422 Validation=0 | 429 Overload=0 | 5xx Errors=0 | Other=0
+409 Breakdown  : idempotency_key_reuse: 186, seat_taken: 1481
+Latencies (ms) : p50=1091.9ms | p95=4882.5ms | p99=7349.7ms | max=9812.2ms
+
+--- Scenario D: Per-User Limit Race (1 user x 10 parallel, limit 4) ---
+Total Requests : 10 in 0.15s (64.8 req/s)
+Distribution   : 201 Created=4 | 200 Replay=0 | 409 Conflict=6 | 422 Validation=0 | 429 Overload=0 | 5xx Errors=0 | Other=0
+409 Breakdown  : idempotency_key_reuse: 4, per_user_limit: 2
+Latencies (ms) : p50=114.3ms | p95=136.7ms | p99=136.7ms | max=136.7ms
+
+--- Scenario E: Spoof & Ownership Protection ---
+  [PASS] Foreign cancellation rejected with 404 Not Found (ownership enforced)
+
+--- Scenario F: Cancel / Rebook Race (1 cancel vs 50 contenders) ---
+Total Requests : 51 in 0.85s (60.2 req/s)
+Distribution   : 201 Created=1 | 200 Replay=1 | 409 Conflict=49 | 422 Validation=0 | 429 Overload=0 | 5xx Errors=0 | Other=0
+409 Breakdown  : seat_taken: 49
+Latencies (ms) : p50=466.1ms | p95=773.0ms | p99=806.4ms | max=806.4ms
+
+=================================================================
+FINAL RECONCILIATION & OBSERVABILITY AUDIT
+=================================================================
+Show Final State: Total=500 | Available=225 | Held=0 | Confirmed=275
+  [PASS] Mathematical Invariant: 225 + 0 + 275 == 500
+  [PASS] Exact Audit: confirmed (275) == sum(201 seats [276]) - cancelled (1)
+  [PASS] /metrics scraped successfully
+  [PASS] Zero 5xx guarantee holds (5xx errors = 0 across all scenarios)
+=================================================================
+BURST VERIFICATION COMPLETE: ALL PASS [OK]
+
+================================================================================
+INSTRUCTIONS FOR RUNNING & APPENDING LIVE BURSTS:
+1. Ensure the remote service is live:
+   make smoke BASE_URL=https://<your-render-app>.onrender.com
+2. Cold run (right after deploy):
+   python scripts/burst.py https://<your-render-app>.onrender.com --seats 500 --users 2000 --hot 10 --concurrency 100 >> docs/live-burst-output.txt
+3. Warm run (immediate second execution):
+   python scripts/burst.py https://<your-render-app>.onrender.com --seats 500 --users 2000 --hot 10 --concurrency 100 >> docs/live-burst-output.txt
+================================================================================

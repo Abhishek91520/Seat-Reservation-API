@@ -27,10 +27,15 @@ is_db_connected: bool = False
 async def get_reserved_ready_conn() -> asyncpg.Connection:
     global reserved_ready_conn
     if reserved_ready_conn is None or reserved_ready_conn.is_closed():
+        kwargs = {
+            "statement_cache_size": settings.effective_statement_cache_size,
+            "timeout": 5.0,
+        }
+        if settings.ssl_required:
+            kwargs["ssl"] = "require"
         reserved_ready_conn = await asyncpg.connect(
             settings.effective_db_url,
-            statement_cache_size=settings.db_statement_cache_size,
-            timeout=5.0,
+            **kwargs,
         )
     return reserved_ready_conn
 
@@ -59,14 +64,20 @@ async def connect_with_backoff(max_wait_seconds: float = 60.0) -> asyncpg.Pool:
     backoff = 0.5
     last_error: Optional[Exception] = None
 
+    pool_kwargs = {
+        "min_size": settings.effective_pool_size,
+        "max_size": settings.effective_pool_size,
+        "statement_cache_size": settings.effective_statement_cache_size,
+        "command_timeout": 15.0,
+    }
+    if settings.ssl_required:
+        pool_kwargs["ssl"] = "require"
+
     while (asyncio.get_event_loop().time() - start_time) < max_wait_seconds:
         try:
             p = await asyncpg.create_pool(
                 dsn=settings.effective_db_url,
-                min_size=settings.db_pool_min_size,
-                max_size=settings.db_pool_max_size,
-                statement_cache_size=settings.db_statement_cache_size,
-                command_timeout=15.0,
+                **pool_kwargs,
             )
             # Test connection
             async with p.acquire() as conn:
@@ -89,15 +100,17 @@ async def connect_with_backoff(max_wait_seconds: float = 60.0) -> asyncpg.Pool:
 
 async def init_db() -> None:
     global pool, db_semaphore, is_db_connected
-    db_semaphore = asyncio.Semaphore(settings.db_semaphore_size)
+    db_semaphore = asyncio.Semaphore(settings.effective_semaphore_size)
     try:
         pool = await connect_with_backoff(max_wait_seconds=settings.db_connect_retry_timeout)
         is_db_connected = True
         logger.info(
             "db_pool_initialized",
-            min_size=settings.db_pool_min_size,
-            max_size=settings.db_pool_max_size,
-            statement_cache_size=settings.db_statement_cache_size,
+            pool_size=settings.effective_pool_size,
+            semaphore_size=settings.effective_semaphore_size,
+            pooler_mode=settings.pooler_mode,
+            statement_cache_size=settings.effective_statement_cache_size,
+            ssl_required=settings.ssl_required,
         )
         async with pool.acquire() as conn:
             await run_migrations(conn)
@@ -129,6 +142,15 @@ async def close_db() -> None:
 
 
 async def check_db_ready() -> bool:
+    global pool, is_db_connected
+    if pool is None or getattr(pool, "_closed", False):
+        try:
+            pool = await connect_with_backoff(max_wait_seconds=3.0)
+            is_db_connected = True
+            async with pool.acquire() as conn:
+                await run_migrations(conn)
+        except Exception:
+            return False
     try:
         conn = await get_reserved_ready_conn()
         res = await asyncio.wait_for(conn.fetchval("SELECT 1"), timeout=1.0)

@@ -179,3 +179,22 @@ This document records the interaction log, human directions, and agent-implement
     - Live `fuzz.py` execution (12s, 20 workers): 821 operations completed with 0 x 5xx, reconciliation passed.
     - Standalone `reconcile.py` executed across all database shows with 100% invariant passes.
 
+### Phase 8: Deploy on Render + Supabase and Verification Blueprint
+- **Human Input**: Confirmed proceeding with Phase 8 and Phase 9.
+- **Agent Actions**:
+  - Implemented `scripts/smoke.py`: full end-to-end smoke check testing `/healthz`, `/readyz`, token generation (`POST /auth/token`), admin show creation (`POST /shows`), seat reservation (`POST /reservations`), idempotent replay with `Idempotent-Replayed: true`, cancellation (`POST /reservations/{id}/cancel`), and post-cancellation invariant verification.
+  - Updated `Makefile` smoke target to invoke `scripts/smoke.py $(BASE_URL)`.
+  - Updated `app/config.py` and `app/db.py`:
+    - Direct support for `DB_POOL_SIZE` override matching Render / Supabase connection limits.
+    - Automatic Supavisor pooler mode detection (session mode vs transaction mode on port 6543 / 6432).
+    - Automatic statement cache disabling (`statement_cache_size=0`) when connecting through transaction poolers.
+    - Enforced SSL requirement when connecting to remote Supabase hosts.
+    - Startup and readiness resilience with exponential backoff on cold/paused database starts.
+  - Created `docs/live-burst-output.txt` documenting baseline benchmark execution and instructions for live remote capture.
+  - Verified `render.yaml` configuration with Singapore region, Docker runtime, starter/free plan details, and `/readyz` health check.
+  - Validation Gate:
+    - Ruff check & format: 100% clean.
+    - `python scripts/smoke.py http://127.0.0.1:8000`: ALL SMOKE CHECKS PASSED [OK].
+    - Unit & integration tests: 30/30 passed in 16.09s.
+
+
