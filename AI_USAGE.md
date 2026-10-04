@@ -197,4 +197,24 @@ This document records the interaction log, human directions, and agent-implement
     - `python scripts/smoke.py http://127.0.0.1:8000`: ALL SMOKE CHECKS PASSED [OK].
     - Unit & integration tests: 30/30 passed in 16.09s.
 
+### Phase 9: Documentation Polish (README.md & WRITEUP.md)
+- **Human Input**: Directed to finalize README quickstarts, grader assumptions, and WRITEUP.md factual scaffolding with `TODO(human)` markers.
+- **Agent Actions**:
+  - Rewrote `README.md`:
+    - Detailed table of live endpoints and service resources.
+    - Clarified the 3 key grader questions: token acquisition via open `POST /auth/token`, 200 OK replay convention, and private `ADMIN_TOKEN` handling.
+    - Complete step-by-step cURL quickstart walkthrough (health, token, show creation, booking, idempotent replay, show inspection, cancellation).
+    - Comprehensive `make` target table.
+    - Instructions for running in local, Docker, prodlike, and PgBouncer environments.
+    - Burst benchmark and reconciliation usage.
+    - UptimeRobot keep-alive guidance for Render/Supabase free tiers.
+  - Completed `WRITEUP.md`:
+    - Preserved required sections with exact factual data pulled from code and `docs/perf-notes.md`.
+    - Included 6 production PromQL alerts with severity and runbook procedures.
+    - Placed explicit `TODO(human)` markers in each section for human architectural reflections.
+  - Validation Gate:
+    - Ruff linter & format: 100% clean across all 54 repository files.
+    - Test suites verified.
+
+
 
