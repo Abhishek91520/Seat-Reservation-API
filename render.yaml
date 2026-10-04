@@ -16,7 +16,8 @@ services:
       - key: ADMIN_TOKEN
         sync: false
       - key: DB_POOL_SIZE
-        value: "15"
+        value: "10"
+
       - key: DB_STATEMENT_CACHE_SIZE
         value: "100"
       - key: SHOW_STATE_CACHE_MS

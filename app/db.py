@@ -64,9 +64,18 @@ async def connect_with_backoff(max_wait_seconds: float = 60.0) -> asyncpg.Pool:
     backoff = 0.5
     last_error: Optional[Exception] = None
 
+    pool_max = settings.effective_pool_size
+    if settings.ssl_required:
+        # Cap pool size to 10 for Supabase free-tier session mode (hard 15 connection cap)
+        # leaving ample buffer for /readyz and transient socket churn
+        pool_max = min(pool_max, 10)
+        pool_min = min(2, pool_max)
+    else:
+        pool_min = min(settings.db_pool_min_size, pool_max)
+
     pool_kwargs = {
-        "min_size": settings.effective_pool_size,
-        "max_size": settings.effective_pool_size,
+        "min_size": pool_min,
+        "max_size": pool_max,
         "statement_cache_size": settings.effective_statement_cache_size,
         "command_timeout": 15.0,
     }
@@ -157,6 +166,13 @@ async def check_db_ready() -> bool:
         return res == 1
     except Exception as e:
         logger.warning("readyz_check_failed", error=str(e))
+        # Fallback to borrowing an idle connection from pool if reserved conn slot was unavailable
+        if pool is not None and not getattr(pool, "_closed", False):
+            try:
+                async with pool.acquire(timeout=0.5) as pool_conn:
+                    return await pool_conn.fetchval("SELECT 1") == 1
+            except Exception:
+                pass
         return False
 
 
