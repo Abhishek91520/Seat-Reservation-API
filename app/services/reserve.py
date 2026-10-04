@@ -15,6 +15,7 @@ from app.errors import (
     UnknownSeatException,
     ValidationException,
 )
+from app.logging import reason_var, seats_var, show_id_var
 from app.metrics import (
     reservations_confirmed_total,
     reservations_declined_total,
@@ -49,19 +50,25 @@ async def reserve_seats(
     Returns:
         (response_body, status_code, is_replay)
     """
+    show_id_var.set(show_id_str)
+    seats_var.set(seats)
+
     # -------------------------------------------------------------------------
     # STEP 0: In-Memory Validation & Show Preload
     # -------------------------------------------------------------------------
     if not idempotency_key or not idempotency_key.strip():
+        reason_var.set("validation_error")
         raise ValidationException("Idempotency key must be provided and non-empty")
     idempotency_key = idempotency_key.strip()
 
     try:
         show_uuid = uuid.UUID(show_id_str)
     except (ValueError, AttributeError):
+        reason_var.set("not_found")
         raise NotFoundException(f"Show {show_id_str} not found") from None
 
     if not seats:
+        reason_var.set("validation_error")
         raise ValidationException("Must request at least one seat")
 
     cleaned_seats: List[str] = []
@@ -69,8 +76,10 @@ async def reserve_seats(
     for s in seats:
         lbl = s.strip()
         if not lbl:
+            reason_var.set("validation_error")
             raise ValidationException("Seat label cannot be empty or whitespace")
         if lbl in seen:
+            reason_var.set("validation_error")
             raise ValidationException(f"Duplicate seat label in request: '{lbl}'")
         seen.add(lbl)
         cleaned_seats.append(lbl)
@@ -93,12 +102,14 @@ async def reserve_seats(
             show_uuid,
         )
         if not show_row:
+            reason_var.set("not_found")
             raise NotFoundException(f"Show {show_id_str} not found")
 
         per_user_limit = show_row["per_user_limit"]
         price_paise = show_row["price_paise"]
 
         if num_requested > per_user_limit:
+            reason_var.set("validation_error")
             raise ValidationException(
                 f"Requested {num_requested} seats exceeds show per_user_limit of {per_user_limit}"
             )
@@ -137,12 +148,14 @@ async def reserve_seats(
             )
             if stored_key_row:
                 if stored_key_row["request_hash"] != request_hash:
+                    reason_var.set("idempotency_key_reuse")
                     reservations_declined_total.labels(reason="idempotency_key_reuse").inc()
                     raise IdempotencyKeyReuseException(
                         "Idempotency key reused with different request payload"
                     )
 
                 # Identical request replay: return stored response with HTTP 200
+                reason_var.set("idempotent_replay")
                 reservations_declined_total.labels(reason="idempotent_replay").inc()
                 response_data = stored_key_row["response_body"]
                 if isinstance(response_data, str):
@@ -182,6 +195,7 @@ async def reserve_seats(
         )
 
         if new_quota is None:
+            reason_var.set("per_user_limit")
             reservations_declined_total.labels(reason="per_user_limit").inc()
             raise PerUserLimitException(
                 f"User quota exceeded: cannot reserve {num_requested} seats "
@@ -211,12 +225,14 @@ async def reserve_seats(
         )
 
         if len(seat_rows) != num_requested:
+            reason_var.set("unknown_seat")
             found_labels = {r["label"] for r in seat_rows}
             missing = [lbl for lbl in sorted_labels if lbl not in found_labels]
             raise UnknownSeatException(f"Unknown seat labels in show: {', '.join(missing)}")
 
         unavailable = [r["label"] for r in seat_rows if r["status"] != "available"]
         if unavailable:
+            reason_var.set("seat_taken")
             reservations_declined_total.labels(reason="seat_taken").inc()
             raise SeatTakenException(unavailable_seats=sorted(unavailable))
 
@@ -283,6 +299,7 @@ async def reserve_seats(
             json.dumps(response_body),
         )
 
+        reason_var.set("confirmed")
         return response_body, 201, False
 
     result, status_code, is_replay = await execute_in_transaction_with_retry(_tx_operation)

@@ -6,9 +6,12 @@ from typing import Optional
 
 import structlog
 
-# Context variable for request ID tracking
+# Context variables for request tracking
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
 user_id_var: ContextVar[Optional[str]] = ContextVar("user_id", default=None)
+show_id_var: ContextVar[Optional[str]] = ContextVar("show_id", default=None)
+seats_var: ContextVar[Optional[list]] = ContextVar("seats", default=None)
+reason_var: ContextVar[Optional[str]] = ContextVar("reason", default=None)
 
 
 def get_request_id() -> str:

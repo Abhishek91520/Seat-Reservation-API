@@ -41,11 +41,14 @@ def db_pool():
 
 @pytest.fixture(autouse=True)
 async def manage_app_lifecycle():
+    from app.metrics import reset_metrics
+
     await init_db()
     async with db_connection() as conn:
         await conn.execute(
             "TRUNCATE shows, seats, reservations, user_show_quota, idempotency_keys CASCADE;"
         )
+    reset_metrics()
     yield
     await close_db()
 

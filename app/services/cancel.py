@@ -51,18 +51,21 @@ async def cancel_reservation(user_id: str, reservation_id_str: str) -> Dict[str,
 
         # Idempotent double-cancel returns 200 OK immediately
         if res_row["status"] == "cancelled":
-            return {
-                "id": str(res_row["id"]),
-                "show_id": str(res_row["show_id"]),
-                "user_id": res_row["user_id"],
-                "seats": res_row["seats"],
-                "amount_paise": res_row["amount_paise"],
-                "status": "cancelled",
-                "created_at": res_row["created_at"].isoformat(),
-                "cancelled_at": (
-                    res_row["cancelled_at"].isoformat() if res_row["cancelled_at"] else None
-                ),
-            }
+            return (
+                {
+                    "id": str(res_row["id"]),
+                    "show_id": str(res_row["show_id"]),
+                    "user_id": res_row["user_id"],
+                    "seats": res_row["seats"],
+                    "amount_paise": res_row["amount_paise"],
+                    "status": "cancelled",
+                    "created_at": res_row["created_at"].isoformat(),
+                    "cancelled_at": (
+                        res_row["cancelled_at"].isoformat() if res_row["cancelled_at"] else None
+                    ),
+                },
+                False,
+            )
 
         show_id = res_row["show_id"]
         seats_list = res_row["seats"]
@@ -149,17 +152,21 @@ async def cancel_reservation(user_id: str, reservation_id_str: str) -> Dict[str,
 
         cancelled_at_str = cancelled_row["cancelled_at"].isoformat()
 
-        return {
-            "id": str(res_row["id"]),
-            "show_id": str(res_row["show_id"]),
-            "user_id": res_row["user_id"],
-            "seats": res_row["seats"],
-            "amount_paise": res_row["amount_paise"],
-            "status": "cancelled",
-            "created_at": res_row["created_at"].isoformat(),
-            "cancelled_at": cancelled_at_str,
-        }
+        return (
+            {
+                "id": str(res_row["id"]),
+                "show_id": str(res_row["show_id"]),
+                "user_id": res_row["user_id"],
+                "seats": res_row["seats"],
+                "amount_paise": res_row["amount_paise"],
+                "status": "cancelled",
+                "created_at": res_row["created_at"].isoformat(),
+                "cancelled_at": cancelled_at_str,
+            },
+            True,
+        )
 
-    cancelled_res = await execute_in_transaction_with_retry(_tx_operation)
-    reservations_cancelled_total.inc()
+    cancelled_res, newly_cancelled = await execute_in_transaction_with_retry(_tx_operation)
+    if newly_cancelled:
+        reservations_cancelled_total.inc()
     return cancelled_res

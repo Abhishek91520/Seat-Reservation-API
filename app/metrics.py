@@ -116,6 +116,45 @@ def record_seat_metrics(show_id: str, available: int, confirmed: int, held: int 
     seats_held.labels(show_id=show_id).set(held)
 
 
+_last_scrape_time = 0.0
+
+
+async def refresh_seats_gauges(conn):
+    global _last_scrape_time
+    now = time.time()
+    if now - _last_scrape_time < 1.0:
+        return
+    _last_scrape_time = now
+    rows = await conn.fetch(
+        """
+        SELECT show_id,
+               count(*) FILTER (WHERE status = 'available') AS available,
+               count(*) FILTER (WHERE status = 'held') AS held,
+               count(*) FILTER (WHERE status = 'confirmed') AS confirmed
+        FROM seats
+        GROUP BY show_id
+        """
+    )
+    for r in rows:
+        record_seat_metrics(str(r["show_id"]), r["available"], r["confirmed"], r["held"])
+
+
 def get_metrics_output() -> Tuple[bytes, str]:
     output = generate_latest(app_registry) + generate_latest(shows_registry)
     return output, CONTENT_TYPE_LATEST
+
+
+def reset_metrics():
+    """Resets all metric counters and gauges to clean state (for testing)."""
+    global _last_scrape_time, _seat_metrics_cache
+    _last_scrape_time = 0.0
+    _seat_metrics_cache.clear()
+    reservations_confirmed_total._value.set(0.0)
+    seats_confirmed_total._value.set(0.0)
+    reservations_cancelled_total._value.set(0.0)
+    reservations_declined_total.clear()
+    http_requests_total.clear()
+    db_retries_total.clear()
+    seats_available.clear()
+    seats_confirmed.clear()
+    seats_held.clear()

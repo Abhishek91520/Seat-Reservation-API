@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import jwt
-from fastapi import Header
+from fastapi import Header, Request
 
 from app.config import settings
 from app.errors import ForbiddenException, UnauthorizedException
@@ -22,7 +22,10 @@ def create_user_token(user_id: str, expires_delta: Optional[timedelta] = None) -
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
-def get_current_user_id(authorization: Optional[str] = Header(None)) -> str:
+def get_current_user_id(
+    request: Request,
+    authorization: Optional[str] = Header(None),
+) -> str:
     if not authorization:
         raise UnauthorizedException("Missing Authorization header")
 
@@ -44,6 +47,7 @@ def get_current_user_id(authorization: Optional[str] = Header(None)) -> str:
             raise UnauthorizedException("Token payload missing subject ('sub')")
         user_id_str = str(user_id)
         user_id_var.set(user_id_str)
+        request.state.user_id = user_id_str
         return user_id_str
     except jwt.ExpiredSignatureError as err:
         raise UnauthorizedException("Token has expired") from err

@@ -1,7 +1,9 @@
+import asyncio
+
 from fastapi import APIRouter, Response, status
 
-from app.db import check_db_ready
-from app.metrics import get_metrics_output
+from app.db import check_db_ready, db_connection
+from app.metrics import get_metrics_output, refresh_seats_gauges
 
 router = APIRouter(tags=["health"])
 
@@ -32,5 +34,11 @@ async def readyz():
 @router.get("/metrics")
 async def metrics():
     """Prometheus metrics endpoint."""
+    try:
+        async with asyncio.timeout(0.5):
+            async with db_connection() as conn:
+                await refresh_seats_gauges(conn)
+    except Exception:
+        pass
     body, content_type = get_metrics_output()
     return Response(content=body, media_type=content_type)

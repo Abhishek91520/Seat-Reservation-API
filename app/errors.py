@@ -135,6 +135,7 @@ def format_error_response(
 
 
 async def app_exception_handler(request: Request, exc: AppException) -> JSONResponse:
+    request.state.reason = exc.code
     request_id = getattr(request.state, "request_id", "unknown")
     content = format_error_response(
         code=exc.code,
@@ -152,6 +153,7 @@ async def app_exception_handler(request: Request, exc: AppException) -> JSONResp
 async def validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
+    request.state.reason = "validation_error"
     request_id = getattr(request.state, "request_id", "unknown")
     error_messages = [
         f"{'.'.join(str(loc) for loc in err['loc'])}: {err['msg']}" for err in exc.errors()
@@ -178,6 +180,7 @@ async def validation_exception_handler(
 
 
 async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    request.state.reason = "internal_error"
     request_id = getattr(request.state, "request_id", "unknown")
     logger.exception("unhandled_exception", error=str(exc), request_id=request_id)
     content = format_error_response(

@@ -1,7 +1,7 @@
 import json
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Header, Response, status
+from fastapi import APIRouter, Depends, Header, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.auth import get_current_user_id
@@ -44,13 +44,19 @@ class CreateReservationRequest(BaseModel):
     status_code=status.HTTP_201_CREATED,
 )
 async def create_reservation(
+    request: Request,
     body: CreateReservationRequest,
     idempotency_key_header: Optional[str] = Header(None, alias="Idempotency-Key"),
     user_id: str = Depends(get_current_user_id),
 ) -> Response:
+    request.state.show_id = str(body.show_id)
+    request.state.seats = body.seats
+    request.state.user_id = user_id
+
     # Header takes precedence over body
     effective_idempotency_key = idempotency_key_header or body.idempotency_key
     if not effective_idempotency_key or not effective_idempotency_key.strip():
+        request.state.reason = "validation_error"
         raise ValidationException(
             "Idempotency key must be provided via 'Idempotency-Key' header or body field"
         )
@@ -65,6 +71,9 @@ async def create_reservation(
     headers = {}
     if is_replay:
         headers["Idempotent-Replayed"] = "true"
+        request.state.reason = "idempotent_replay"
+    else:
+        request.state.reason = "confirmed"
 
     return Response(
         content=json.dumps(res_body),

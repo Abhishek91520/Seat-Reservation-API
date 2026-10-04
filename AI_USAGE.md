@@ -104,3 +104,32 @@ This document records the interaction log, human directions, and agent-implement
     - Concurrency test suite: 10/10 concurrency tests passed (including 20,000-request stampede).
     - Canary test: passed canary check (mutation confirmed to produce double-booking failure).
     - Unit and integration tests: 25 passed in 12.16s.
+
+### Phase 5: Observability & Production Monitoring
+- **Human Input**: Directed to implement Prompt 5 (Observability, PromQL alerts, reconciliation tests).
+- **Agent Actions**:
+  - Implemented structured context tracking across requests:
+    - Middleware records `request_id`, `method`, `route`, `status`, `latency_ms`, `user_id`, `outcome`.
+    - Added reservation-specific context capturing: `show_id`, `seats`, and `reason` (e.g. `confirmed`, `seat_taken`, `per_user_limit`, `idempotency_key_reuse`, `idempotent_replay`, `validation_error`).
+    - Handled Starlette child context isolation by synchronizing request context through `request.state` and `contextvars`.
+  - Implemented `refresh_seats_gauges` with 1-second caching and non-blocking timeout fallback to cached values during DB saturation.
+  - Implemented `reset_metrics()` in `app/metrics.py` for test lifecycle reset.
+  - Updated `app/services/cancel.py` so that `reservations_cancelled_total` only increments on genuine `confirmed -> cancelled` transitions (not idempotent double cancels), guaranteeing mathematical reconciliation with the database.
+  - Created `tests/integration/test_observability.py`:
+    - Validated Prometheus metrics parsing via `prometheus_client.parser.text_string_to_metric_families`.
+    - Validated that counters strictly increment by N after N known operations.
+    - Validated reconciliation invariant: `reservations_confirmed_total - reservations_cancelled_total == count(confirmed reservations in DB)` and `seats_available == GET /shows/{id}.available`.
+    - Validated `X-Request-ID` generation, echo, and structured structlog fields.
+    - Validated that `/readyz` stays 200 within 1s even when the main asyncpg pool is 100% saturated.
+  - Documented production 2 AM alert rules in `WRITEUP.md` with PromQL expressions and runbooks for:
+    1. Critical 5xx rate > 0
+    2. Readiness probe failing (`/readyz`)
+    3. High p99 reservation latency (> 2s)
+    4. Database retries rising (`db_retries_total` indicating lock-order regression)
+    5. Semaphore queue depth saturated (`db_semaphore_waiting > 10`)
+    6. Reconciliation invariant violation (`available + held + confirmed != total`)
+  - Validation Gate:
+    - Ruff lint and format: 100% clean.
+    - Observability test suite: 5/5 passed.
+    - All unit + integration tests: 30/30 passed.
+    - Sample log line verified.

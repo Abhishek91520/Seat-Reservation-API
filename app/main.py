@@ -14,7 +14,14 @@ from app.errors import (
     generic_exception_handler,
     validation_exception_handler,
 )
-from app.logging import request_id_var, setup_logging, user_id_var
+from app.logging import (
+    reason_var,
+    request_id_var,
+    seats_var,
+    setup_logging,
+    show_id_var,
+    user_id_var,
+)
 from app.metrics import (
     http_request_duration_seconds,
     http_requests_total,
@@ -59,6 +66,9 @@ async def logging_and_metrics_middleware(request: Request, call_next) -> Respons
     request.state.request_id = req_id
     request_id_var.set(req_id)
     user_id_var.set(None)
+    show_id_var.set(None)
+    seats_var.set(None)
+    reason_var.set(None)
 
     # In-flight gauge
     inflight_requests.inc()
@@ -96,17 +106,28 @@ async def logging_and_metrics_middleware(request: Request, call_next) -> Respons
         ).inc()
         http_request_duration_seconds.labels(route=route_template).observe(latency_s)
 
-        user_id = user_id_var.get()
-        logger.info(
-            "http_request",
-            request_id=req_id,
-            method=request.method,
-            route=route_template,
-            status=status_code,
-            latency_ms=latency_ms,
-            user_id=user_id,
-            outcome=outcome,
-        )
+        user_id = getattr(request.state, "user_id", None) or user_id_var.get()
+        show_id = getattr(request.state, "show_id", None) or show_id_var.get()
+        seats = getattr(request.state, "seats", None) or seats_var.get()
+        reason = getattr(request.state, "reason", None) or reason_var.get()
+
+        log_data = {
+            "request_id": req_id,
+            "method": request.method,
+            "route": route_template,
+            "status": status_code,
+            "latency_ms": latency_ms,
+            "user_id": user_id,
+            "outcome": outcome,
+        }
+        if show_id is not None:
+            log_data["show_id"] = show_id
+        if seats is not None:
+            log_data["seats"] = seats
+        if reason is not None:
+            log_data["reason"] = reason
+
+        logger.info("http_request", **log_data)
 
 
 # Register routes

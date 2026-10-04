@@ -71,35 +71,53 @@ This document outlines the architectural decisions, concurrency safety proofs, f
   - `db_pool_in_use`, `db_semaphore_waiting`, `db_retries_total{sqlstate}`, `inflight_requests`
 
 ### Production PromQL Alert Rules (2 AM Runbook)
-1. **Critical 5xx Rate Spikes**:
+1. **Critical 5xx Rate > 0**:
    ```promql
-   sum(rate(http_requests_total{status=~"5.."}[1m])) / sum(rate(http_requests_total[1m])) > 0.01
+   sum(rate(http_requests_total{status=~"5.."}[1m])) > 0
    ```
-   *Action*: Investigate unhandled exceptions or database network failure.
+   - *Severity*: P1 Critical (Immediate Page).
+   - *Interpretation*: Unhandled exception or unexpected database error during request execution. Under normal burst traffic, all domain declines must be 4xx.
+   - *Action*: Check structlog stdout for `unhandled_exception` events, verify PostgreSQL connectivity and disk space.
 
-2. **Readiness Probe Failing**:
+2. **Readiness Probe Failing (`/readyz`)**:
    ```promql
-   probe_success{instance=~".*/readyz"} == 0
+   probe_success{instance=~".*/readyz"} == 0 or http_requests_total{route="/readyz", status="503"} > 0
    ```
-   *Action*: PostgreSQL instance unresponsive or connection pool dropped. Check Render/Supabase health.
+   - *Severity*: P1 Critical (Immediate Page).
+   - *Interpretation*: The dedicated health-check connection failed to execute `SELECT 1` within 1.0s. PostgreSQL is either completely unreachable, out of connection slots, or deadlocked.
+   - *Action*: Check PostgreSQL server process health, inspect database server logs, and verify network connectivity between app container and DB.
 
-3. **Database Retries Rising (Lock-Order Regression)**:
+3. **High p99 Reservation Latency**:
    ```promql
-   rate(db_retries_total[2m]) > 0
+   histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{route="/reservations"}[5m])) by (le)) > 2.0
    ```
-   *Action*: Deadlock detected (`40P01`). Check if any newly added endpoint queries seats without `ORDER BY label`.
+   - *Severity*: P2 Warning.
+   - *Interpretation*: 99th percentile booking latency exceeds 2.0 seconds, indicating deep lock contention on hot seats or database I/O saturation.
+   - *Action*: Inspect `db_semaphore_waiting` and active row locks in `pg_locks`. Verify if contending users are queuing on the same high-demand show.
 
-4. **Semaphore Queue Depth Saturated**:
+4. **Database Retries Rising (Lock-Order Regression Bug)**:
    ```promql
-   db_semaphore_waiting > 100
+   sum(rate(db_retries_total[2m])) > 0
    ```
-   *Action*: Requests are backing up waiting for database connections; scale database instance or investigate long-running locks.
+   - *Severity*: P1 Critical.
+   - *Interpretation*: PostgreSQL deadlock (`40P01`) or serialization failure (`40001`) occurred. Because all queries are designed to follow a global deterministic lock hierarchy (`idempotency -> quota -> seats ORDER BY label`), this metric rising indicates a code regression violating the lock sequence.
+   - *Action*: Identify recently deployed code paths that lock seats or quotas out of order. Roll back if necessary.
 
-5. **Show Invariant Violation**:
+5. **Semaphore Queue Depth Saturated**:
    ```promql
-   (seats_available + seats_held + seats_confirmed) != ignoring(status) on(show_id) total_seats
+   db_semaphore_waiting > 10
    ```
-   *Action*: Severe data corruption alert. Trigger reconciliation job immediately.
+   - *Severity*: P2 Warning.
+   - *Interpretation*: Inbound requests have saturated the connection pool (`max_size=15`) and are queuing in the 25-second wait buffer. Approaching overload threshold where 429 responses will be emitted.
+   - *Action*: Scale PostgreSQL pool capacity or consider scaling read replicas for non-transactional show queries.
+
+6. **Reconciliation Invariant Violation (`available + held + confirmed != total`)**:
+   ```promql
+   (seats_available + seats_held + seats_confirmed) != on(show_id) group_left() (shows_total_seats)
+   ```
+   - *Severity*: P0 Catastrophic (Immediate Page).
+   - *Interpretation*: The mathematical invariant `available + held + confirmed == total_seats` has broken on one or more shows, indicating state corruption or phantom allocation.
+   - *Action*: Stop traffic to the affected show immediately. Run `scripts/reconcile.py` against the database to trace inconsistent seat rows.
 
 - TODO(human): Add team escalation paths and pager policy details.
 
