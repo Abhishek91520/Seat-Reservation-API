@@ -8,7 +8,8 @@ A production-grade, highly observable seat reservation service built to remain s
 
 | Resource | Path / Value | Description |
 | :--- | :--- | :--- |
-| **Live Service URL** | `https://<render-app-slug>.onrender.com` | Deployed on Render (Singapore, `ap-southeast-1`) |
+| **Live Service URL** | `https://seat-reservation-api-9tym.onrender.com` | Deployed on Render (Singapore, `ap-southeast-1`) |
+| **Interactive API Docs**| `GET /docs` | Interactive Swagger UI playground to test all endpoints |
 | **Liveness Check** | `GET /healthz` | Process liveness (no DB call, always 200 if up) |
 | **Readiness Check** | `GET /readyz` | Probes PostgreSQL on dedicated connection (`SELECT 1`, 1s timeout) |
 | **Prometheus Metrics**| `GET /metrics` | Prometheus text metrics (counters, histograms, gauges) |
@@ -27,7 +28,7 @@ A production-grade, highly observable seat reservation service built to remain s
 ### A. How Graders Obtain Tokens (Open Token Endpoint)
 Tokens are generated using the open authentication endpoint:
 ```bash
-curl -X POST https://<app>.onrender.com/auth/token \
+curl -X POST https://seat-reservation-api-9tym.onrender.com/auth/token \
   -H "Content-Type: application/json" \
   -d '{"user_id": "grader_demo"}'
 ```
@@ -60,19 +61,19 @@ Response:
 
 ### Step 1: Check System Readiness
 ```bash
-curl -i https://<app>.onrender.com/readyz
+curl -i https://seat-reservation-api-9tym.onrender.com/readyz
 ```
 
 ### Step 2: Mint a User JWT
 ```bash
-TOKEN=$(curl -s -X POST https://<app>.onrender.com/auth/token \
+TOKEN=$(curl -s -X POST https://seat-reservation-api-9tym.onrender.com/auth/token \
   -H "Content-Type: application/json" \
   -d '{"user_id": "alice"}' | jq -r .access_token)
 ```
 
 ### Step 3: Create a Show (Admin)
 ```bash
-SHOW_ID=$(curl -s -X POST https://<app>.onrender.com/shows \
+SHOW_ID=$(curl -s -X POST https://seat-reservation-api-9tym.onrender.com/shows \
   -H "Authorization: Bearer <ADMIN_TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{
@@ -86,7 +87,7 @@ echo "Created Show: $SHOW_ID"
 
 ### Step 4: Book Seats (Idempotent Reservation)
 ```bash
-RESERVATION_ID=$(curl -s -X POST https://<app>.onrender.com/reservations \
+RESERVATION_ID=$(curl -s -X POST https://seat-reservation-api-9tym.onrender.com/reservations \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d "{
@@ -100,7 +101,7 @@ echo "Created Reservation: $RESERVATION_ID"
 ### Step 5: Test Idempotent Replay
 Re-sending the exact same request returns `200 OK` and `Idempotent-Replayed: true`:
 ```bash
-curl -i -X POST https://<app>.onrender.com/reservations \
+curl -i -X POST https://seat-reservation-api-9tym.onrender.com/reservations \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d "{
@@ -112,7 +113,7 @@ curl -i -X POST https://<app>.onrender.com/reservations \
 
 ### Step 6: Verify Atomic Show State
 ```bash
-curl -s https://<app>.onrender.com/shows/$SHOW_ID | jq .
+curl -s https://seat-reservation-api-9tym.onrender.com/shows/$SHOW_ID | jq .
 ```
 Shows:
 ```json
@@ -136,7 +137,7 @@ Shows:
 
 ### Step 7: Cancel Reservation
 ```bash
-curl -i -X POST https://<app>.onrender.com/reservations/$RESERVATION_ID/cancel \
+curl -i -X POST https://seat-reservation-api-9tym.onrender.com/reservations/$RESERVATION_ID/cancel \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -205,7 +206,7 @@ pytest tests/chaos/test_pgbouncer.py -v
 
 Run the automated burst benchmark suite:
 ```bash
-make burst BASE_URL=https://<app>.onrender.com
+make burst BASE_URL=https://seat-reservation-api-9tym.onrender.com
 ```
 
 The script executes 6 sequential scenarios:
@@ -244,7 +245,7 @@ The script executes 6 sequential scenarios:
 ### Free Tier Keep-Alive Guidance
 If deployed on Render's free tier:
 1. Set up a free monitor on [UptimeRobot](https://uptimerobot.com).
-2. Configure HTTP `GET` probe targeting `https://<app>.onrender.com/readyz` every 5 minutes.
+2. Configure HTTP `GET` probe targeting `https://seat-reservation-api-9tym.onrender.com/readyz` every 5 minutes.
 3. This prevents Render from spinning down after 15 minutes of inactivity and prevents Supabase from pausing the database after 7 days of inactivity.
 
 ---
@@ -252,7 +253,7 @@ If deployed on Render's free tier:
 ## 8. Live Visual Seat Grid Dashboard
 
 A self-contained, real-time visualizer is available at `/live` to monitor shows filling up during concurrent bursts:
-- **URL Pattern**: `https://<app>.onrender.com/live?show=<show_id>`
+- **URL Pattern**: `https://seat-reservation-api-9tym.onrender.com/live?show=<show_id>`
 - **Show Selector**: Visiting `/live` without a query parameter renders an input form to paste any Show UUID.
 - **Features**:
   - Live header with currency formatting derived purely from integer paise math.
