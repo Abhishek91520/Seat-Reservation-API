@@ -1,7 +1,7 @@
 import hashlib
 import json
 import uuid
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import asyncpg
 import structlog
@@ -41,15 +41,25 @@ def compute_request_hash(show_id: str, seats: List[str]) -> str:
 
 async def reserve_seats(
     user_id: str,
-    show_id_str: str,
-    seats: List[str],
-    idempotency_key: str,
+    show_id_str: Optional[str] = None,
+    seats: Optional[List[str]] = None,
+    idempotency_key: str = "",
+    *,
+    show_id: Optional[str] = None,
 ) -> Tuple[Dict[str, Any], int, bool]:
     """Executes atomic seat reservation in a single READ COMMITTED transaction.
 
     Returns:
         (response_body, status_code, is_replay)
     """
+    actual_show_id = show_id if show_id is not None else show_id_str
+    if actual_show_id is None:
+        reason_var.set("validation_error")
+        raise ValidationException("Show ID is required")
+    show_id_str = str(actual_show_id)
+    if seats is None:
+        seats = []
+
     show_id_var.set(show_id_str)
     seats_var.set(seats)
 

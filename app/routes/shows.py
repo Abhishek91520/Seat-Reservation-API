@@ -144,8 +144,8 @@ async def reserve_show_seats(
     effective_idempotency_key = effective_idempotency_key.strip()
 
     res_body, status_code, is_replay = await reserve_seats(
-        show_id=show_id,
         user_id=user_id,
+        show_id_str=show_id,
         seats=body.seats,
         idempotency_key=effective_idempotency_key,
     )
@@ -153,6 +153,9 @@ async def reserve_show_seats(
     headers = {}
     if is_replay:
         headers["Idempotent-Replayed"] = "true"
+        request.state.reason = "idempotent_replay"
+    else:
+        request.state.reason = None
 
     return Response(
         content=json.dumps(res_body),

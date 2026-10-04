@@ -269,3 +269,14 @@ This document records the interaction log, human directions, and agent-implement
     - Updated reservation response payload to return both `"id"` and `"reservation_id"`.
     - Added integration test `test_reserve_via_shows_endpoint` and verified 100% test pass.
     - Updated [README.md](file:///c:/Users/abhis/Desktop/TP/paytm%20task/README.md) documentation.
+
+### Maintenance: Fix `reserve_seats` Keyword Argument & Local DB Configuration for Burst Testing
+- **Human Input**: Requested explanation and fix for `TypeError: reserve_seats() got an unexpected keyword argument 'show_id'` at `app/routes/shows.py:147`, and requested connection string setup in `.env` to test `scripts/burst.py` locally.
+- **Agent Actions**:
+  - Diagnosed mismatch: `reserve_seats` in [app/services/reserve.py](file:///c:/Users/abhis/Desktop/TP/paytm%20task/app/services/reserve.py#L42) defined the parameter as `show_id_str`, whereas [app/routes/shows.py](file:///c:/Users/abhis/Desktop/TP/paytm%20task/app/routes/shows.py#L147) invoked it with `show_id=show_id`.
+  - Updated [app/services/reserve.py](file:///c:/Users/abhis/Desktop/TP/paytm%20task/app/services/reserve.py#L42) so `reserve_seats` accepts either `show_id` or `show_id_str` kwargs, ensuring full backward and cross compatibility.
+  - Aligned [app/routes/shows.py](file:///c:/Users/abhis/Desktop/TP/paytm%20task/app/routes/shows.py#L146) to pass `show_id_str=show_id` and explicitly record `request.state.reason = "idempotent_replay"` on replays.
+  - Tested local PostgreSQL instances, confirming the local test cluster on port 5433 (`postgresql://postgres:postgres@localhost:5433/testdb`) is running and initialized with all 5 tables.
+  - Updated [.env](file:///c:/Users/abhis/Desktop/TP/paytm%20task/.env) with the local connection string `DATABASE_URL=postgresql://postgres:postgres@localhost:5433/testdb` and `DB_STATEMENT_CACHE_SIZE=100` for running the service and running `scripts/burst.py` locally.
+  - Verified with pytest: all tests pass (including `tests/integration/test_shows.py` and `tests/concurrency/test_mutation_canary.py`).
+
