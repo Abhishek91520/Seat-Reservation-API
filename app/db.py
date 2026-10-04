@@ -66,10 +66,10 @@ async def connect_with_backoff(max_wait_seconds: float = 60.0) -> asyncpg.Pool:
 
     pool_max = settings.effective_pool_size
     if settings.ssl_required:
-        # Cap pool size to 10 for Supabase free-tier session mode (hard 15 connection cap)
-        # leaving ample buffer for /readyz and transient socket churn
-        pool_max = min(pool_max, 10)
-        pool_min = min(2, pool_max)
+        # Cap pool size to 6 for Supabase free-tier session mode (hard 15 connection cap)
+        # allowing 2 containers during rolling deploys (6 + 6 + 2 = 14 <= 15)
+        pool_max = min(pool_max, 6)
+        pool_min = min(1, pool_max)
     else:
         pool_min = min(settings.db_pool_min_size, pool_max)
 
@@ -83,16 +83,22 @@ async def connect_with_backoff(max_wait_seconds: float = 60.0) -> asyncpg.Pool:
         pool_kwargs["ssl"] = "require"
 
     while (asyncio.get_event_loop().time() - start_time) < max_wait_seconds:
+        candidate_pool: Optional[asyncpg.Pool] = None
         try:
-            p = await asyncpg.create_pool(
+            candidate_pool = await asyncpg.create_pool(
                 dsn=settings.effective_db_url,
                 **pool_kwargs,
             )
             # Test connection
-            async with p.acquire() as conn:
+            async with candidate_pool.acquire() as conn:
                 await conn.fetchval("SELECT 1")
-            return p
+            return candidate_pool
         except Exception as e:
+            if candidate_pool is not None:
+                try:
+                    await asyncio.wait_for(candidate_pool.close(), timeout=1.0)
+                except Exception:
+                    pass
             last_error = e
             logger.warning(
                 "db_connect_failed_retrying",
@@ -109,14 +115,18 @@ async def connect_with_backoff(max_wait_seconds: float = 60.0) -> asyncpg.Pool:
 
 async def init_db() -> None:
     global pool, db_semaphore, is_db_connected
-    db_semaphore = asyncio.Semaphore(settings.effective_semaphore_size)
+    effective_max = settings.effective_pool_size
+    if settings.ssl_required:
+        effective_max = min(effective_max, 6)
+    sem_size = min(settings.effective_semaphore_size, effective_max)
+    db_semaphore = asyncio.Semaphore(sem_size)
     try:
         pool = await connect_with_backoff(max_wait_seconds=settings.db_connect_retry_timeout)
         is_db_connected = True
         logger.info(
             "db_pool_initialized",
-            pool_size=settings.effective_pool_size,
-            semaphore_size=settings.effective_semaphore_size,
+            pool_size=effective_max,
+            semaphore_size=sem_size,
             pooler_mode=settings.pooler_mode,
             statement_cache_size=settings.effective_statement_cache_size,
             ssl_required=settings.ssl_required,

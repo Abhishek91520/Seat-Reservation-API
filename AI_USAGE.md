@@ -241,6 +241,16 @@ This document records the interaction log, human directions, and agent-implement
   - Replaced the parameter return type annotation with `Awaitable[T]` (imported from `typing`), matching both coroutines (`async def`) and futures while satisfying the `await operation(conn)` call.
   - Verified with `ruff check app/db.py` and unit tests (all passed).
 
+### Maintenance: Supabase Free-Tier Pool Limit (EMAXCONNSESSION) Hardening
+- **Human Input**: Provided Render deployment logs showing `(EMAXCONNSESSION) max clients reached in session mode - max clients are limited to pool_size: 15`.
+- **Agent Actions**:
+  - Diagnosed that zero-downtime rolling deploys on Render spin up the new container while the old container still holds its connection pool, exceeding the 15-client limit in Supabase session mode.
+  - Hardened [app/db.py](file:///c:/Users/abhis/Desktop/TP/paytm%20task/app/db.py):
+    - Capped `pool_max` to 6 and `pool_min` to 1 for remote SSL/Supabase session mode so that two containers can safely overlap during rolling deploys (`6 + 6 + 2 = 14 <= 15`).
+    - Added explicit cleanup (`await candidate_pool.close()`) in `connect_with_backoff` on connection test exceptions to prevent socket leaks during retries.
+    - Synchronized `db_semaphore` to `pool_max`.
+  - Confirmed live deployment status: `/readyz` recovered and returns 200 ready once old container connections cleared.
+
 
 
 
