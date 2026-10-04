@@ -29,6 +29,7 @@ from app.metrics import (
 )
 from app.routes.auth import router as auth_router
 from app.routes.health import router as health_router
+from app.routes.live import router as live_router
 from app.routes.reservations import router as reservations_router
 from app.routes.shows import router as shows_router
 
@@ -135,3 +136,4 @@ app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(shows_router)
 app.include_router(reservations_router)
+app.include_router(live_router)

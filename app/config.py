@@ -38,6 +38,7 @@ class Settings(BaseSettings):
 
     # Domain defaults
     default_per_user_limit: int = 4
+    show_state_cache_ms: int = 500
 
     @property
     def effective_db_url(self) -> str:

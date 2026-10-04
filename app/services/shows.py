@@ -1,10 +1,19 @@
 import json
+import time
 import uuid
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
+from app.config import settings
 from app.db import db_connection
 from app.errors import NotFoundException, ValidationException
 from app.metrics import record_seat_metrics
+
+# In-process cache for show state reads: show_id -> (timestamp, data)
+_show_state_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+
+
+def clear_show_state_cache() -> None:
+    _show_state_cache.clear()
 
 
 async def create_show(
@@ -85,6 +94,16 @@ async def get_show_by_id(show_id_str: str) -> Dict[str, Any]:
     except (ValueError, AttributeError):
         raise NotFoundException(f"Show {show_id_str} not found") from None
 
+    # In-process cache check
+    cache_ttl = settings.show_state_cache_ms / 1000.0
+    now = time.monotonic()
+    if cache_ttl > 0:
+        cached = _show_state_cache.get(show_id_str)
+        if cached is not None:
+            cached_at, cached_data = cached
+            if (now - cached_at) < cache_ttl:
+                return cached_data
+
     async with db_connection() as conn:
         row = await conn.fetchrow(
             """
@@ -122,7 +141,7 @@ async def get_show_by_id(show_id_str: str) -> Dict[str, Any]:
 
     record_seat_metrics(show_id_str, available=available, confirmed=confirmed, held=held)
 
-    return {
+    result = {
         "id": str(row["id"]),
         "name": row["name"],
         "price_paise": row["price_paise"],
@@ -133,3 +152,8 @@ async def get_show_by_id(show_id_str: str) -> Dict[str, Any]:
         "confirmed": confirmed,
         "seats": seats_data,
     }
+
+    if cache_ttl > 0:
+        _show_state_cache[show_id_str] = (now, result)
+
+    return result

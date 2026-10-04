@@ -216,5 +216,24 @@ This document records the interaction log, human directions, and agent-implement
     - Ruff linter & format: 100% clean across all 54 repository files.
     - Test suites verified.
 
+### Phase 10 (Optional): Live Seat-Grid Dashboard
+- **Human Input**: Directed to implement Prompt 10 (Live seat-grid dashboard at `GET /live`).
+- **Agent Actions**:
+  - Implemented self-contained `app/static/live.html` (<400 lines) with vanilla JS and CSS variables (dark/light mode via `prefers-color-scheme`, motion reduction via `prefers-reduced-motion`).
+  - Rendered show metadata, integer-computed rupee pricing, stat counters, invariant validation badge, naturally sorted seat grid, canvas fallback for >2000 seats, real-time rates panel, and 60-second SVG sparkline.
+  - Added in-process 500ms read cache (`SHOW_STATE_CACHE_MS`, default 500ms) in `app/services/shows.py` protecting PostgreSQL during concurrent dashboard browsing.
+  - Created `GET /live` route in `app/routes/live.py` serving `live.html` via `FileResponse`.
+  - Implemented `tests/integration/test_live_dashboard.py`: verified 200 status, absence of external HTTP/HTTPS resource URLs, and in-process cache hit and expiration behavior.
+  - Implemented `scripts/capture_screenshots.py`: automated Playwright headless Chromium screenshots across 4 viewport/theme combinations (`mobile_light`, `mobile_dark`, `desktop_light`, `desktop_dark`). Verified programmatically that `scrollWidth <= innerWidth` at 390px (zero horizontal overflow).
+  - Implemented `scripts/test_live_burst.py`: executed full high-concurrency burst benchmark against localhost while `/live` actively polled in headless Chromium; verified **0 x 5xx errors and ALL PASS [OK]**.
+  - Verified concurrency tests passed with both `SHOW_STATE_CACHE_MS=0` and `SHOW_STATE_CACHE_MS=500` without modifying any pre-existing test files.
+  - Updated `README.md` with `/live?show=<id>` documentation.
+  - Validation Gate:
+    - 32/32 unit & integration tests passed.
+    - Concurrency test suite passed under both cache configurations.
+    - 4 visual screenshots captured in `docs/screenshots/` with zero layout defects.
+    - Live burst under active browser polling completed with 0 x 5xx and 100% invariant passes.
+
+
 
 

@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Seat Reservation API - Live Seat Grid</title>
+<style>
+:root {
+  --bg: #f6f8fa; --surface: #ffffff; --border: #d0d7de; --text: #1f2328;
+  --text-muted: #656d76; --avail: #e1e4e8; --avail-border: #d0d7de;
+  --conf: #1a7f37; --held: #9a6700; --held-bg: #fff8c5; --danger: #cf222e;
+  --success: #1a7f37; --flash: #0969da;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d; --text: #e6edf3;
+    --text-muted: #8b949e; --avail: #21262d; --avail-border: #30363d;
+    --conf: #2ea043; --held: #d29922; --held-bg: #3d2c00; --danger: #f85149;
+    --success: #3fb950; --flash: #58a6ff;
+  }
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg); color: var(--text); line-height: 1.4;
+  padding: 12px; max-width: 1200px; margin: 0 auto; overflow-x: hidden;
+}
+header {
+  display: flex; flex-wrap: wrap; justify-content: space-between;
+  align-items: center; gap: 8px; margin-bottom: 12px;
+}
+h1 { font-size: 1.25rem; font-weight: 700; }
+.meta-tag {
+  font-size: 0.8rem; padding: 2px 8px; border-radius: 4px;
+  background: var(--surface); border: 1px solid var(--border);
+}
+.grid-container {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px; margin-bottom: 12px;
+}
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 6px; padding: 10px;
+}
+.stat-title { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; }
+.stat-num { font-size: 1.6rem; font-weight: 700; font-family: monospace; }
+.badge {
+  display: inline-block; font-size: 0.75rem; font-weight: 600;
+  padding: 2px 6px; border-radius: 4px; margin-top: 4px;
+}
+.badge-ok { background: rgba(46, 160, 67, 0.15); color: var(--success); }
+.badge-bad { background: rgba(248, 81, 73, 0.15); color: var(--danger); }
+.badge-warn { background: rgba(210, 153, 34, 0.15); color: var(--held); }
+#seats-box {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 6px; padding: 12px; margin-bottom: 12px;
+}
+.seats-header {
+  display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center;
+  gap: 8px; margin-bottom: 8px; font-size: 0.85rem; font-weight: 600;
+}
+
+.legend { display: flex; gap: 8px; font-size: 0.75rem; flex-wrap: wrap; }
+.legend-item { display: flex; align-items: center; gap: 4px; }
+.legend-dot { width: 10px; height: 10px; border-radius: 2px; }
+.dot-avail { background: var(--avail); border: 1px solid var(--border); }
+.dot-conf { background: var(--conf); }
+.dot-held {
+  background: repeating-linear-gradient(45deg, var(--held), var(--held) 2px, var(--held-bg) 2px, var(--held-bg) 4px);
+}
+#seat-grid {
+  display: flex; flex-wrap: wrap; gap: 4px; max-height: 420px;
+  overflow-y: auto; padding: 2px;
+}
+.seat-cell {
+  width: 24px; height: 24px; border-radius: 3px; font-size: 0.65rem;
+  font-family: monospace; display: flex; align-items: center;
+  justify-content: center; user-select: none; cursor: pointer;
+  background: var(--avail); border: 1px solid var(--avail-border);
+  color: var(--text-muted); transition: background 0.15s, border 0.15s;
+}
+.seat-cell.confirmed {
+  background: var(--conf); border-color: var(--conf); color: #ffffff;
+}
+.seat-cell.held {
+  background: repeating-linear-gradient(45deg, var(--held), var(--held) 3px, var(--held-bg) 3px, var(--held-bg) 6px);
+  border-color: var(--held); color: #000; font-weight: bold;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .seat-cell.flash {
+    outline: 2px solid var(--flash); outline-offset: 1px;
+    animation: flashAnim 0.6s ease-out;
+  }
+}
+@keyframes flashAnim {
+  0% { transform: scale(1.18); filter: brightness(1.4); }
+  100% { transform: scale(1); filter: brightness(1); }
+}
+#seat-canvas { width: 100%; height: 320px; display: block; }
+#rates-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px; margin-bottom: 12px;
+}
+.tile-danger { border-color: var(--danger) !important; background: rgba(248, 81, 73, 0.1); }
+.spark-box { width: 100%; height: 36px; margin-top: 4px; }
+footer {
+  font-size: 0.8rem; color: var(--text-muted); display: flex;
+  justify-content: space-between; flex-wrap: wrap; gap: 8px;
+  padding-top: 8px; border-top: 1px solid var(--border);
+}
+footer a { color: var(--flash); text-decoration: none; }
+footer a:hover { text-decoration: underline; }
+#tooltip {
+  position: fixed; background: #000; color: #fff; padding: 4px 8px;
+  border-radius: 4px; font-size: 0.75rem; pointer-events: none;
+  opacity: 0; transition: opacity 0.1s; z-index: 1000; font-family: monospace;
+}
+#show-picker {
+  background: var(--surface); border: 1px solid var(--border);
+  padding: 16px; border-radius: 6px; margin: 20px auto; max-width: 440px;
+}
+input[type="text"] {
+  width: 100%; padding: 8px; margin: 8px 0; border: 1px solid var(--border);
+  border-radius: 4px; background: var(--bg); color: var(--text);
+  font-family: monospace; font-size: 0.85rem;
+}
+button {
+  background: var(--conf); color: #fff; border: none; padding: 8px 16px;
+  border-radius: 4px; cursor: pointer; font-weight: 600; width: 100%;
+}
+</style>
+</head>
+<body>
+<div id="tooltip"></div>
+<div id="show-picker" style="display:none;">
+  <h2 style="font-size:1.1rem; margin-bottom:8px;">Live Seat Grid Inspector</h2>
+  <p style="font-size:0.85rem; color:var(--text-muted);">Enter Show UUID to visualize real-time seat allocations:</p>
+  <form id="picker-form">
+    <input type="text" id="picker-show-id" placeholder="e.g. 5f3dce19-ffad-4598-8f22-066eca7c8318" required />
+    <input type="text" id="picker-token" placeholder="JWT Token (optional)" />
+    <button type="submit">Inspect Show</button>
+  </form>
+</div>
+<div id="dashboard" style="display:none;">
+  <header>
+    <div>
+      <h1 id="show-title">Show Name</h1>
+      <span style="font-size:0.8rem; color:var(--text-muted); font-family:monospace;" id="show-uuid"></span>
+    </div>
+    <div style="display:flex; gap:6px; align-items:center;">
+      <span class="meta-tag" id="show-price">₹0.00</span>
+      <span class="meta-tag" id="status-pill">Active</span>
+    </div>
+  </header>
+  <div class="grid-container">
+    <div class="card">
+      <div class="stat-title">Available Seats</div>
+      <div class="stat-num" id="cnt-avail">0</div>
+      <div class="badge badge-ok" id="badge-avail-pct">100% free</div>
+    </div>
+    <div class="card">
+      <div class="stat-title">Held Seats</div>
+      <div class="stat-num" id="cnt-held">0</div>
+      <div class="badge badge-warn" id="badge-held">TTL Cart</div>
+    </div>
+    <div class="card">
+      <div class="stat-title">Confirmed Seats</div>
+      <div class="stat-num" id="cnt-conf">0</div>
+      <svg class="spark-box" id="sparkline" viewBox="0 0 100 24" preserveAspectRatio="none">
+        <path id="spark-path" fill="none" stroke="var(--conf)" stroke-width="2" d="M 0 24 L 100 24" />
+      </svg>
+    </div>
+    <div class="card">
+      <div class="stat-title">Total Seats & Invariant</div>
+      <div class="stat-num" id="cnt-total">0</div>
+      <div class="badge badge-ok" id="badge-inv">✓ Invariant Holds</div>
+    </div>
+  </div>
+  <div id="seats-box">
+    <div class="seats-header">
+      <span>SEAT ALLOCATION MAP</span>
+      <div class="legend">
+        <div class="legend-item"><div class="legend-dot dot-avail"></div><span>Available</span></div>
+        <div class="legend-item"><div class="legend-dot dot-held"></div><span>Held</span></div>
+        <div class="legend-item"><div class="legend-dot dot-conf"></div><span>Confirmed</span></div>
+      </div>
+    </div>
+    <div id="seat-grid"></div>
+    <canvas id="seat-canvas" style="display:none;"></canvas>
+  </div>
+  <div id="rates-grid">
+    <div class="card">
+      <div class="stat-title">Confirmed / sec</div>
+      <div class="stat-num" id="rate-conf">0.0</div>
+    </div>
+    <div class="card">
+      <div class="stat-title">Seat Taken / sec</div>
+      <div class="stat-num" id="rate-taken">0.0</div>
+    </div>
+    <div class="card">
+      <div class="stat-title">Quota Limit / sec</div>
+      <div class="stat-num" id="rate-quota">0.0</div>
+    </div>
+    <div class="card">
+      <div class="stat-title">Key Replay / sec</div>
+      <div class="stat-num" id="rate-replay">0.0</div>
+    </div>
+    <div class="card" id="card-5xx">
+      <div class="stat-title">5xx Errors</div>
+      <div class="stat-num" id="cnt-5xx">0</div>
+    </div>
+  </div>
+  <footer>
+    <span>Seat Reservation Service Dashboard</span>
+    <div style="display:flex; gap:12px;">
+      <a href="/docs">Docs</a>
+      <a href="/metrics">Metrics</a>
+      <a href="/healthz">Healthz</a>
+      <a href="/readyz">Readyz</a>
+    </div>
+  </footer>
+</div>
+<script>
+(() => {
+  const urlParams = new URLSearchParams(window.location.search);
+  const showId = urlParams.get('show');
+  let token = urlParams.get('token') || sessionStorage.getItem('token') || '';
+  if (urlParams.has('token')) {
+    sessionStorage.setItem('token', token);
+    urlParams.delete('token');
+    const newUrl = window.location.pathname + (urlParams.toString() ? '?' + urlParams.toString() : '');
+    window.history.replaceState({}, '', newUrl);
+  }
+
+  const tooltip = document.getElementById('tooltip');
+  document.addEventListener('mousemove', (e) => {
+    if (tooltip.style.opacity === '1') {
+      tooltip.style.left = (e.clientX + 10) + 'px';
+      tooltip.style.top = (e.clientY + 10) + 'px';
+    }
+  });
+
+  if (!showId) {
+    document.getElementById('show-picker').style.display = 'block';
+    document.getElementById('picker-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const s = document.getElementById('picker-show-id').value.trim();
+      const t = document.getElementById('picker-token').value.trim();
+      if (!s) return;
+      const target = '/live?show=' + encodeURIComponent(s) + (t ? '&token=' + encodeURIComponent(t) : '');
+      window.location.href = target;
+    });
+    return;
+  }
+
+  document.getElementById('dashboard').style.display = 'block';
+  document.getElementById('show-uuid').textContent = showId;
+
+  let prevSeats = {};
+  let seatElements = {};
+  let lastMetricPoll = null;
+  let prevMetricVals = null;
+  const historyConf = [];
+  let pollInterval = 1000;
+  let timerId = null;
+
+  function formatPaise(paise) {
+    const rs = Math.floor(paise / 100);
+    const ps = String(paise % 100).padStart(2, '0');
+    return '₹' + rs + '.' + ps;
+  }
+
+  function naturalSort(a, b) {
+    return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+  }
+
+  function renderSparkline() {
+    const svgPath = document.getElementById('spark-path');
+    if (historyConf.length < 2) return;
+    const maxVal = Math.max(...historyConf.map(h => h.val), 0);
+    const minVal = Math.min(...historyConf.map(h => h.val), 0);
+    const diff = maxVal - minVal;
+    if (diff === 0) {
+      svgPath.setAttribute('d', 'M 0 12 L 100 12');
+      return;
+    }
+    const pts = historyConf.map((h, i) => {
+      const x = (i / (historyConf.length - 1)) * 100;
+      const y = 24 - (((h.val - minVal) / diff) * 20 + 2);
+      return `${x.toFixed(1)} ${y.toFixed(1)}`;
+    });
+    svgPath.setAttribute('d', 'M ' + pts.join(' L '));
+  }
+
+
+  function parseMetrics(text) {
+    const data = { conf: 0, taken: 0, quota: 0, replay: 0, err5xx: 0 };
+    const lines = text.split('\n');
+    for (const line of lines) {
+      if (line.startsWith('#') || !line.trim()) continue;
+      if (line.startsWith('reservations_confirmed_total')) {
+        const parts = line.split(' ');
+        data.conf = parseFloat(parts[parts.length - 1]) || 0;
+      } else if (line.startsWith('reservations_declined_total')) {
+        const parts = line.split(' ');
+        const v = parseFloat(parts[parts.length - 1]) || 0;
+        if (line.includes('seat_taken')) data.taken = v;
+        if (line.includes('per_user_limit')) data.quota = v;
+        if (line.includes('idempotent_replay')) data.replay = v;
+      } else if (line.startsWith('http_requests_total')) {
+        if (/status="5\d\d"/.test(line)) {
+          const parts = line.split(' ');
+          data.err5xx += parseFloat(parts[parts.length - 1]) || 0;
+        }
+      }
+    }
+    return data;
+  }
+
+  async function poll() {
+    const headers = {};
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+
+    try {
+      const [showRes, metricsRes] = await Promise.all([
+        fetch('/shows/' + encodeURIComponent(showId), { headers }),
+        fetch('/metrics')
+      ]);
+
+      if (!showRes.ok) {
+        throw new Error('Show API returned ' + showRes.status);
+      }
+
+      const show = await showRes.json();
+      document.getElementById('status-pill').textContent = 'Live';
+      document.getElementById('status-pill').className = 'meta-tag badge-ok';
+      pollInterval = 1000;
+
+      document.getElementById('show-title').textContent = show.name;
+      document.getElementById('show-price').textContent = formatPaise(show.price_paise);
+      document.getElementById('cnt-avail').textContent = show.available;
+      document.getElementById('cnt-held').textContent = show.held;
+      document.getElementById('cnt-conf').textContent = show.confirmed;
+      document.getElementById('cnt-total').textContent = show.total_seats;
+
+      const pctFree = show.total_seats > 0 ? Math.round((show.available / show.total_seats) * 100) : 0;
+      document.getElementById('badge-avail-pct').textContent = pctFree + '% free';
+
+      const invBadge = document.getElementById('badge-inv');
+      const invSum = show.available + show.held + show.confirmed;
+      if (invSum === show.total_seats) {
+        invBadge.textContent = '✓ ' + show.available + '+' + show.held + '+' + show.confirmed + ' = ' + show.total_seats;
+        invBadge.className = 'badge badge-ok';
+      } else {
+        invBadge.textContent = '✗ ' + invSum + ' != ' + show.total_seats;
+        invBadge.className = 'badge badge-bad';
+      }
+
+      const now = Date.now();
+      historyConf.push({ time: now, val: show.confirmed });
+      while (historyConf.length > 0 && now - historyConf[0].time > 60000) {
+        historyConf.shift();
+      }
+      renderSparkline();
+
+      const seatKeys = Object.keys(show.seats || {});
+      const totalSeats = seatKeys.length;
+      if (totalSeats > 2000) {
+        document.getElementById('seat-grid').style.display = 'none';
+        const canvas = document.getElementById('seat-canvas');
+        canvas.style.display = 'block';
+        drawCanvasGrid(canvas, show.seats, seatKeys);
+      } else {
+        document.getElementById('seat-canvas').style.display = 'none';
+        const grid = document.getElementById('seat-grid');
+        grid.style.display = 'flex';
+        renderDomGrid(grid, show.seats, seatKeys);
+      }
+
+      if (metricsRes.ok) {
+        const metricsText = await metricsRes.text();
+        const m = parseMetrics(metricsText);
+        if (prevMetricVals && lastMetricPoll) {
+          const dt = Math.max((now - lastMetricPoll) / 1000, 0.1);
+          const rConf = Math.max(0, (m.conf - prevMetricVals.conf) / dt);
+          const rTaken = Math.max(0, (m.taken - prevMetricVals.taken) / dt);
+          const rQuota = Math.max(0, (m.quota - prevMetricVals.quota) / dt);
+          const rReplay = Math.max(0, (m.replay - prevMetricVals.replay) / dt);
+          document.getElementById('rate-conf').textContent = rConf.toFixed(1);
+          document.getElementById('rate-taken').textContent = rTaken.toFixed(1);
+          document.getElementById('rate-quota').textContent = rQuota.toFixed(1);
+          document.getElementById('rate-replay').textContent = rReplay.toFixed(1);
+        }
+        document.getElementById('cnt-5xx').textContent = m.err5xx;
+        const c5 = document.getElementById('card-5xx');
+        if (m.err5xx > 0) c5.classList.add('tile-danger');
+        else c5.classList.remove('tile-danger');
+        prevMetricVals = m;
+        lastMetricPoll = now;
+      }
+    } catch (err) {
+      document.getElementById('status-pill').textContent = 'Reconnecting...';
+      document.getElementById('status-pill').className = 'meta-tag badge-bad';
+      pollInterval = Math.min(pollInterval * 2, 5000);
+    } finally {
+      timerId = setTimeout(poll, pollInterval);
+    }
+  }
+
+  function renderDomGrid(grid, seats, seatKeys) {
+    if (Object.keys(seatElements).length === 0) {
+      seatKeys.sort(naturalSort);
+      grid.innerHTML = '';
+      for (const label of seatKeys) {
+        const cell = document.createElement('div');
+        cell.className = 'seat-cell';
+        cell.textContent = label;
+        cell.addEventListener('mouseenter', () => {
+          tooltip.textContent = `Seat ${label}: ${seats[label] || 'available'}`;
+          tooltip.style.opacity = '1';
+        });
+        cell.addEventListener('mouseleave', () => { tooltip.style.opacity = '0'; });
+        grid.appendChild(cell);
+        seatElements[label] = cell;
+      }
+    }
+    for (const label of seatKeys) {
+      const st = seats[label] || 'available';
+      const cell = seatElements[label];
+      if (!cell) continue;
+      const prevSt = prevSeats[label];
+      if (prevSt && prevSt !== st) {
+        cell.classList.remove('flash');
+        void cell.offsetWidth;
+        cell.classList.add('flash');
+      }
+      cell.className = 'seat-cell ' + (st === 'confirmed' ? 'confirmed' : (st === 'held' ? 'held' : ''));
+    }
+    prevSeats = Object.assign({}, seats);
+  }
+
+  function drawCanvasGrid(canvas, seats, seatKeys) {
+    const ctx = canvas.getContext('2d');
+    const cols = Math.floor(canvas.clientWidth / 8) || 30;
+    const w = 7, h = 7, pad = 1;
+    canvas.width = canvas.clientWidth;
+    canvas.height = Math.ceil(seatKeys.length / cols) * (h + pad) + pad;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    seatKeys.sort(naturalSort);
+    seatKeys.forEach((lbl, idx) => {
+      const col = idx % cols;
+      const row = Math.floor(idx / cols);
+      const x = col * (w + pad);
+      const y = row * (h + pad);
+      const st = seats[lbl] || 'available';
+      ctx.fillStyle = st === 'confirmed' ? '#2ea043' : (st === 'held' ? '#d29922' : '#30363d');
+      ctx.fillRect(x, y, w, h);
+    });
+  }
+
+  poll();
+})();
+</script>
+</body>
+</html>

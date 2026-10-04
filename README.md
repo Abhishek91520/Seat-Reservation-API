@@ -17,6 +17,8 @@ A production-grade, highly observable seat reservation service built to remain s
 | **Create Show** | `POST /shows` | Admin endpoint to create show and initialize seats |
 | **Reserve Seats** | `POST /reservations` | Reserve 1 to N seats with idempotency key |
 | **Cancel Booking** | `POST /reservations/{id}/cancel` | Cancel an active reservation |
+| **Live Dashboard** | `GET /live?show=<id>` | Real-time seat allocation grid visualizer |
+
 
 ---
 
@@ -244,3 +246,19 @@ If deployed on Render's free tier:
 1. Set up a free monitor on [UptimeRobot](https://uptimerobot.com).
 2. Configure HTTP `GET` probe targeting `https://<app>.onrender.com/readyz` every 5 minutes.
 3. This prevents Render from spinning down after 15 minutes of inactivity and prevents Supabase from pausing the database after 7 days of inactivity.
+
+---
+
+## 8. Live Visual Seat Grid Dashboard
+
+A self-contained, real-time visualizer is available at `/live` to monitor shows filling up during concurrent bursts:
+- **URL Pattern**: `https://<app>.onrender.com/live?show=<show_id>`
+- **Show Selector**: Visiting `/live` without a query parameter renders an input form to paste any Show UUID.
+- **Features**:
+  - Live header with currency formatting derived purely from integer paise math.
+  - Large counter cards and an active invariant status badge (`available + held + confirmed == total`).
+  - Interactive seat grid featuring natural alphanumeric ordering (`A1`, `A2`, `A10`), status flash highlights, and HTML5 canvas fallback for stadiums (> 2,000 seats).
+  - Rate panel tracking per-second confirmation and decline velocities, and an automated red highlight if any 5xx occurs.
+  - 60-second rolling sparkline of booking progress.
+- **Database Protection**: Backed by a server-side 500ms in-process read cache (`SHOW_STATE_CACHE_MS`), preventing 100 simultaneous observer tabs from querying PostgreSQL more than twice per second.
+
