@@ -281,4 +281,28 @@ This document records the interaction log, human directions, and agent-implement
   - Identified that [scripts/burst.py](file:///c:/Users/abhis/Desktop/TP/paytm%20task/scripts/burst.py) used static keys across runs; since PostgreSQL `idempotency_keys` table scopes keys to `(user_id, key)`, subsequent runs against a new show failed with `409 idempotency_key_reuse`. Prefixed benchmark keys and user IDs with a unique `run_id` to guarantee multi-run independence.
   - Executed full 2000-user / 500-seat burst benchmark (`scripts/burst.py`): all scenarios A through F passed with zero 5xx errors and exact invariant verification.
 
+### Phase 13: Local Throughput Optimization, Round-Trip Reduction & Burst Extensions
+- **Human Input**: Directed to diagnose and fix local throughput bottlenecks without altering locking order, SQL semantics, error codes, or tests. Prescribed step-by-step hypothesis validation, DB round-trip reductions, non-blocking logging, test suites re-verification, `scripts/burst.py` extensions, and separate commits with measured numbers.
+- **Agent Actions**:
+  - Measured baseline throughput and profile on separate client/server processes.
+  - Tested hypotheses systematically:
+    - (a) Log level & console I/O: moved from standard stdout writing to non-blocking `logging.handlers.QueueHandler` and `QueueListener` in [app/logging.py](file:///c:/Users/abhis/Desktop/TP/paytm%20task/app/logging.py), and converted Starlette's `BaseHTTPMiddleware` to raw ASGI `FastLoggingAndMetricsMiddleware` in [app/main.py](file:///c:/Users/abhis/Desktop/TP/paytm%20task/app/main.py) (cutting AnyIO TaskGroup allocations). Measured `/healthz` throughput jump from 74.6 req/s to 512.5 req/s.
+    - (b) Pool size: tested pool sizes 15, 30, 50, and 100 with semaphore sizing to maximize concurrency.
+    - (c) Profiling: evaluated cProfile traces identifying event loop overhead and serialized lock contention.
+    - (d) Counted and reduced DB round trips:
+      1. Combined `SET LOCAL` queries into single `set_config` query in [app/db.py](file:///c:/Users/abhis/Desktop/TP/paytm%20task/app/db.py).
+      2. Replaced preliminary show lookup with an in-memory metadata cache `_show_meta_cache` in [app/services/shows.py](file:///c:/Users/abhis/Desktop/TP/paytm%20task/app/services/shows.py).
+      3. Collapsed quota row seed and update into a single atomic query `INSERT ... ON CONFLICT (show_id, user_id) DO UPDATE ... WHERE held + n <= limit RETURNING held` in [app/services/reserve.py](file:///c:/Users/abhis/Desktop/TP/paytm%20task/app/services/reserve.py).
+      4. Combined seat status update, reservation creation, and idempotency key persistence into a single atomic CTE statement in [app/services/reserve.py](file:///c:/Users/abhis/Desktop/TP/paytm%20task/app/services/reserve.py), reducing post-lock hold window and round trips from 13 down to 5. Measured single reserve transaction latency: avg=9.23ms, min=7.71ms.
+  - Test Suites Validation:
+    - Unit & Integration: 33/33 passed (`pytest tests/unit tests/integration`).
+    - Concurrency Suite: 11/11 passed (`pytest tests/concurrency`), including `test_mutation_canary.py` and 20,000-request stampede.
+  - Extended [scripts/burst.py](file:///c:/Users/abhis/Desktop/TP/paytm%20task/scripts/burst.py):
+    - Added body-spoof protection check in Scenario E (verifying request body `user_id` is ignored and token's user identity is enforced).
+    - Added background invariant poller executing `GET /shows/{id}` every 100ms across Scenarios A through C, asserting `available + held + confirmed == total_seats`.
+    - Added Prometheus `/metrics` reconciliation audit in final audit asserting `seats_available` and `reservations_confirmed_total` match database state.
+    - Supported `--users 20000` option and tuned httpx client connection limits and timeouts.
+  - Git Commits:
+    - Committed each change separately with measured performance numbers in commit messages (`fab96d6`, `9bd4956`, `c8b81f3`).
+
 
