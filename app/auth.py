@@ -2,11 +2,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import jwt
-from fastapi import Header, Request
+from fastapi import Depends, Header, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.config import settings
 from app.errors import ForbiddenException, UnauthorizedException
 from app.logging import user_id_var
+
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def create_user_token(user_id: str, expires_delta: Optional[timedelta] = None) -> str:
@@ -24,12 +27,17 @@ def create_user_token(user_id: str, expires_delta: Optional[timedelta] = None) -
 
 def get_current_user_id(
     request: Request,
+    auth_creds: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
     authorization: Optional[str] = Header(None),
 ) -> str:
-    if not authorization:
+    raw_header = authorization
+    if not raw_header and auth_creds:
+        raw_header = f"Bearer {auth_creds.credentials}"
+
+    if not raw_header:
         raise UnauthorizedException("Missing Authorization header")
 
-    parts = authorization.split()
+    parts = raw_header.split()
     if len(parts) != 2 or parts[0].lower() != "bearer":
         raise UnauthorizedException(
             "Invalid Authorization header format. Expected 'Bearer <token>'"
@@ -55,11 +63,18 @@ def get_current_user_id(
         raise UnauthorizedException("Invalid token") from err
 
 
-def verify_admin_auth(authorization: Optional[str] = Header(None)) -> bool:
-    if not authorization:
+def verify_admin_auth(
+    auth_creds: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+    authorization: Optional[str] = Header(None),
+) -> bool:
+    raw_header = authorization
+    if not raw_header and auth_creds:
+        raw_header = f"Bearer {auth_creds.credentials}"
+
+    if not raw_header:
         raise UnauthorizedException("Missing Authorization header")
 
-    parts = authorization.split()
+    parts = raw_header.split()
     if len(parts) != 2 or parts[0].lower() != "bearer":
         raise UnauthorizedException(
             "Invalid Authorization header format. Expected 'Bearer <token>'"

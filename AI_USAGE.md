@@ -251,6 +251,11 @@ This document records the interaction log, human directions, and agent-implement
     - Synchronized `db_semaphore` to `pool_max`.
   - Confirmed live deployment status: `/readyz` recovered and returns 200 ready once old container connections cleared.
 
-
-
+### Maintenance: Swagger UI HTTPBearer Authorization Scheme
+- **Human Input**: Reported missing Authorization button and "Missing Authorization header" in Swagger UI.
+- **Agent Actions**:
+  - Identified that using bare `Header(None)` did not declare an OpenAPI `securitySchemes` component, causing Swagger UI to omit the top-right green Authorize button and suppress `Authorization` headers.
+  - Added `HTTPBearer(auto_error=False)` dependency in [app/auth.py](file:///c:/Users/abhis/Desktop/TP/paytm%20task/app/auth.py#L11) across `get_current_user_id` and `verify_admin_auth`.
+  - Registered `HTTPBearer` in OpenAPI components so Swagger UI provides the standard Authorize modal and automatically formats/injects Bearer tokens.
+  - Verified 100% passing tests and OpenAPI schema compliance.
 
