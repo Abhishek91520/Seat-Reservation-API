@@ -1,9 +1,12 @@
 import datetime
 import logging
+import os
+import queue
 import sys
 import uuid
 from collections import deque
 from contextvars import ContextVar
+from logging.handlers import QueueHandler, QueueListener
 from typing import Optional
 
 import structlog
@@ -24,7 +27,12 @@ def get_request_id() -> str:
     return req_id
 
 
+_log_queue: queue.Queue = queue.Queue(maxsize=100000)
+_queue_listener: Optional[QueueListener] = None
+
+
 def setup_logging():
+    global _queue_listener
     shared_processors = [
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_logger_name,
@@ -42,11 +50,27 @@ def setup_logging():
         cache_logger_on_first_use=True,
     )
 
-    logging.basicConfig(
-        format="%(message)s",
-        stream=sys.stdout,
-        level=logging.INFO,
-    )
+    log_level_str = os.environ.get("LOG_LEVEL", "INFO").upper()
+    log_level = getattr(logging, log_level_str, logging.INFO)
+
+    root_logger = logging.getLogger()
+    root_logger.setLevel(log_level)
+
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(logging.Formatter("%(message)s"))
+
+    if _queue_listener is not None:
+        try:
+            _queue_listener.stop()
+        except Exception:
+            pass
+
+    _queue_listener = QueueListener(_log_queue, stream_handler, respect_handler_level=True)
+    _queue_listener.start()
+
+    # Async worker threads only write into the in-memory queue
+    queue_handler = QueueHandler(_log_queue)
+    root_logger.handlers = [queue_handler]
 
 
 # In-memory circular buffer for public log access
