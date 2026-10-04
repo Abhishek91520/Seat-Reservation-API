@@ -73,11 +73,20 @@ async def connect_with_backoff(max_wait_seconds: float = 60.0) -> asyncpg.Pool:
     else:
         pool_min = min(settings.db_pool_min_size, pool_max)
 
+    server_settings = {
+        "lock_timeout": settings.db_lock_timeout,
+        "statement_timeout": settings.db_statement_timeout,
+        "idle_in_transaction_session_timeout": settings.db_idle_in_transaction_session_timeout,
+    }
+    if not settings.ssl_required:
+        server_settings["synchronous_commit"] = "off"
+
     pool_kwargs = {
         "min_size": pool_min,
         "max_size": pool_max,
         "statement_cache_size": settings.effective_statement_cache_size,
         "command_timeout": 15.0,
+        "server_settings": server_settings,
     }
     if settings.ssl_required:
         pool_kwargs["ssl"] = "require"
@@ -208,8 +217,9 @@ async def db_connection() -> AsyncGenerator[asyncpg.Connection, None]:
 
     db_semaphore_waiting.inc()
     try:
-        await asyncio.wait_for(db_semaphore.acquire(), timeout=settings.db_semaphore_timeout)
-    except asyncio.TimeoutError:
+        async with asyncio.timeout(settings.db_semaphore_timeout):
+            await db_semaphore.acquire()
+    except TimeoutError:
         raise OverloadedException(retry_after=2) from None
     finally:
         db_semaphore_waiting.dec()
@@ -233,13 +243,15 @@ async def execute_in_transaction_with_retry(
         try:
             async with db_connection() as conn:
                 async with conn.transaction():
-                    await conn.execute(f"SET LOCAL lock_timeout='{settings.db_lock_timeout}';")
                     await conn.execute(
-                        f"SET LOCAL statement_timeout='{settings.db_statement_timeout}';"
-                    )
-                    timeout_val = settings.db_idle_in_transaction_session_timeout
-                    await conn.execute(
-                        f"SET LOCAL idle_in_transaction_session_timeout='{timeout_val}';"
+                        """
+                        SELECT set_config('lock_timeout', $1, true),
+                               set_config('statement_timeout', $2, true),
+                               set_config('idle_in_transaction_session_timeout', $3, true);
+                        """,
+                        settings.db_lock_timeout,
+                        settings.db_statement_timeout,
+                        settings.db_idle_in_transaction_session_timeout,
                     )
                     return await operation(conn)
         except (asyncpg.DeadlockDetectedError, asyncpg.SerializationError) as e:

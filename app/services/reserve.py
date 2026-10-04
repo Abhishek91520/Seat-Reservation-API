@@ -1,6 +1,7 @@
 import hashlib
 import json
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import asyncpg
@@ -21,6 +22,7 @@ from app.metrics import (
     reservations_declined_total,
     seats_confirmed_total,
 )
+from app.services.shows import get_cached_show_meta, set_cached_show_meta
 
 logger = structlog.get_logger(__name__)
 
@@ -102,21 +104,34 @@ async def reserve_seats(
     # Transactional Execution with Bounded Retry on 40P01 / 40001
     # -------------------------------------------------------------------------
     async def _tx_operation(conn: asyncpg.Connection) -> Tuple[Dict[str, Any], int, bool]:
-        # Pre-check show existence & fetch immutable limit and price
-        show_row = await conn.fetchrow(
-            """
-            SELECT id, name, price_paise, per_user_limit, total_seats
-            FROM shows
-            WHERE id = $1
-            """,
-            show_uuid,
-        )
-        if not show_row:
-            reason_var.set("not_found")
-            raise NotFoundException(f"Show {show_id_str} not found")
+        # Pre-check show existence & fetch immutable limit and price (from cache or DB on miss)
+        cached_show = get_cached_show_meta(show_uuid)
+        if cached_show:
+            per_user_limit = cached_show["per_user_limit"]
+            price_paise = cached_show["price_paise"]
+        else:
+            show_row = await conn.fetchrow(
+                """
+                SELECT id, name, price_paise, per_user_limit, total_seats
+                FROM shows
+                WHERE id = $1
+                """,
+                show_uuid,
+            )
+            if not show_row:
+                reason_var.set("not_found")
+                raise NotFoundException(f"Show {show_id_str} not found")
 
-        per_user_limit = show_row["per_user_limit"]
-        price_paise = show_row["price_paise"]
+            cached_data = {
+                "id": show_row["id"],
+                "name": show_row["name"],
+                "price_paise": show_row["price_paise"],
+                "per_user_limit": show_row["per_user_limit"],
+                "total_seats": show_row["total_seats"],
+            }
+            set_cached_show_meta(show_uuid, cached_data)
+            per_user_limit = cached_data["per_user_limit"]
+            price_paise = cached_data["price_paise"]
 
         if num_requested > per_user_limit:
             reason_var.set("validation_error")
@@ -173,29 +188,20 @@ async def reserve_seats(
                 return response_data, 200, True
 
         # ---------------------------------------------------------------------
-        # LOCK ORDER STEP 2: Quota Row Lock & Quota Increment
-        # Why race-free:
-        # 1. We ensure the user quota row exists.
-        # 2. We execute an UPDATE ... WHERE held + n <= limit RETURNING held.
+        # LOCK ORDER STEP 2: Quota Row Lock & Quota Increment (Single Statement Upsert)
+        # Why race-free & atomic:
+        # Atomic INSERT ... ON CONFLICT DO UPDATE WHERE held + n <= limit RETURNING held.
         # Postgres acquires an exclusive row-level lock on (show_id, user_id).
         # Any parallel requests for the same user serialize at this row.
-        # If held + n > limit, 0 rows are returned, triggering a rollback.
+        # If held + n > limit, 0 rows are updated/inserted, returning None and rolling back.
         # ---------------------------------------------------------------------
-        await conn.execute(
-            """
-            INSERT INTO user_show_quota (show_id, user_id, held)
-            VALUES ($1, $2, 0)
-            ON CONFLICT (show_id, user_id) DO NOTHING
-            """,
-            show_uuid,
-            user_id,
-        )
-
         new_quota = await conn.fetchval(
             """
-            UPDATE user_show_quota
-            SET held = held + $3
-            WHERE show_id = $1 AND user_id = $2 AND (held + $3) <= $4
+            INSERT INTO user_show_quota (show_id, user_id, held)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (show_id, user_id)
+            DO UPDATE SET held = user_show_quota.held + EXCLUDED.held
+            WHERE (user_show_quota.held + EXCLUDED.held) <= $4
             RETURNING held
             """,
             show_uuid,
@@ -254,37 +260,7 @@ async def reserve_seats(
         # ---------------------------------------------------------------------
         reservation_id = uuid.uuid4()
         total_amount_paise = price_paise * num_requested
-
-        update_count = await conn.execute(
-            """
-            UPDATE seats
-            SET status = 'confirmed', reservation_id = $3, user_id = $4
-            WHERE show_id = $1 AND label = ANY($2::text[]) AND status = 'available'
-            """,
-            show_uuid,
-            sorted_labels,
-            reservation_id,
-            user_id,
-        )
-
-        # Confirm exact row update count
-        if update_count != f"UPDATE {num_requested}":
-            raise RuntimeError(
-                f"Unexpected seat update count: expected {num_requested}, got {update_count}"
-            )
-
-        res_row = await conn.fetchrow(
-            """
-            INSERT INTO reservations (id, show_id, user_id, seats, amount_paise, status)
-            VALUES ($1, $2, $3, $4, $5, 'confirmed')
-            RETURNING created_at
-            """,
-            reservation_id,
-            show_uuid,
-            user_id,
-            sorted_labels,
-            total_amount_paise,
-        )
+        created_at_dt = datetime.now(timezone.utc)
 
         response_body = {
             "id": str(reservation_id),
@@ -294,20 +270,34 @@ async def reserve_seats(
             "seats": sorted_labels,
             "amount_paise": total_amount_paise,
             "status": "confirmed",
-            "created_at": res_row["created_at"].isoformat(),
+            "created_at": created_at_dt.isoformat(),
         }
 
-        # Persist response body for future idempotent replays
         await conn.execute(
             """
+            WITH upd_seats AS (
+                UPDATE seats
+                SET status = 'confirmed', reservation_id = $3, user_id = $4
+                WHERE show_id = $1 AND label = ANY($2::text[]) AND status = 'available'
+            ),
+            ins_res AS (
+                INSERT INTO reservations (
+                    id, show_id, user_id, seats, amount_paise, status, created_at
+                )
+                VALUES ($3, $1, $4, $2, $5, 'confirmed', $6)
+            )
             UPDATE idempotency_keys
-            SET reservation_id = $3, response_body = $4::jsonb
-            WHERE user_id = $1 AND key = $2
+            SET reservation_id = $3, response_body = $7::jsonb
+            WHERE user_id = $4 AND key = $8;
             """,
-            user_id,
-            idempotency_key,
+            show_uuid,
+            sorted_labels,
             reservation_id,
+            user_id,
+            total_amount_paise,
+            created_at_dt,
             json.dumps(response_body),
+            idempotency_key,
         )
 
         reason_var.set("confirmed")

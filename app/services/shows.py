@@ -1,7 +1,7 @@
 import json
 import time
 import uuid
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.config import settings
 from app.db import db_connection
@@ -11,9 +11,22 @@ from app.metrics import record_seat_metrics
 # In-process cache for show state reads: show_id -> (timestamp, data)
 _show_state_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 
+# In-process cache for immutable show metadata (id, name, price_paise, per_user_limit, total_seats)
+_show_meta_cache: Dict[uuid.UUID, Dict[str, Any]] = {}
+
 
 def clear_show_state_cache() -> None:
     _show_state_cache.clear()
+    _show_meta_cache.clear()
+
+
+def get_cached_show_meta(show_id: uuid.UUID) -> Optional[Dict[str, Any]]:
+    return _show_meta_cache.get(show_id)
+
+
+def set_cached_show_meta(show_id: uuid.UUID, data: Dict[str, Any]) -> None:
+    _show_meta_cache[show_id] = data
+
 
 
 async def create_show(
@@ -77,6 +90,16 @@ async def create_show(
             )
 
     record_seat_metrics(str(show_id), available=total_seats, confirmed=0, held=0)
+    set_cached_show_meta(
+        show_id,
+        {
+            "id": show_id,
+            "name": name_clean,
+            "price_paise": price_paise,
+            "per_user_limit": per_user_limit,
+            "total_seats": total_seats,
+        },
+    )
 
     return {
         "id": str(show_row["id"]),
