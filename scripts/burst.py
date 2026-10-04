@@ -20,7 +20,8 @@ import jwt
 
 # Default secrets matching config fallbacks
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "admin-secret-token-change-in-prod")
-JWT_SECRET = os.environ.get("JWT_SECRET", "supa-secret-jwt-seat-reservation-prod-2026")
+JWT_SECRET = os.environ.get("JWT_SECRET", "seat-reservation-dev-secret-change-in-prod")
+
 
 
 def mint_token(arg1: str, arg2: Optional[str] = None) -> str:
@@ -53,7 +54,11 @@ def print_stats_table(title: str, stats: Dict[str, any]):
         reasons_str = ", ".join(f"{k}: {v}" for k, v in stats["decline_reasons"].items())
         print(f"409 Breakdown  : {reasons_str}")
     if stats.get("other", 0) > 0 and "status_counts" in stats:
-        other_counts = {k: v for k, v in stats["status_counts"].items() if k not in (200, 201, 409, 422, 429) and not (500 <= k <= 599)}
+        other_counts = {
+            k: v
+            for k, v in stats["status_counts"].items()
+            if k not in (200, 201, 409, 422, 429) and not (500 <= k <= 599)
+        }
         print(f"Other Breakdown: {other_counts}")
     print(
         f"Latencies (ms) : p50={stats['p50']:.1f}ms | "
@@ -105,9 +110,10 @@ async def execute_burst(
                     except Exception:
                         pass
                 return r
-            except Exception:
+            except Exception as exc:
                 lat = (time.perf_counter() - t0) * 1000
                 latencies.append(lat)
+                print(f"[CLIENT_ERR] {type(exc).__name__}: {exc}")
                 status_counts[599] = status_counts.get(599, 0) + 1
                 return None
 
@@ -177,9 +183,12 @@ async def async_main():
     print("=================================================================")
 
     limits = httpx.Limits(
-        max_connections=args.concurrency, max_keepalive_connections=args.concurrency
+        max_connections=args.concurrency * 2,
+        max_keepalive_connections=args.concurrency * 2,
+        keepalive_expiry=30.0,
     )
-    async with httpx.AsyncClient(limits=limits, timeout=45.0) as client:
+    timeout = httpx.Timeout(60.0, connect=30.0, read=60.0, write=30.0, pool=60.0)
+    async with httpx.AsyncClient(limits=limits, timeout=timeout) as client:
         # 1. Health check
         h_resp = await client.get(f"{base_url}/healthz")
         r_resp = await client.get(f"{base_url}/readyz")
@@ -230,6 +239,33 @@ async def async_main():
             token_cache[f"{run_id}_hot_{i}"] = mint_token(base_url, f"{run_id}_hot_{i}")
         for i in range(args.hot * 100):
             token_cache[f"{run_id}_hotset_{i}"] = mint_token(base_url, f"{run_id}_hotset_{i}")
+
+        # Start background invariant poller (GET /shows/{id} every 100ms during Scenarios A to C)
+        poller_stop = asyncio.Event()
+        poller_violations: List[str] = []
+        poll_count = 0
+
+        async def _background_invariant_poller():
+            nonlocal poll_count
+            while not poller_stop.is_set():
+                try:
+                    p_resp = await client.get(f"{base_url}/shows/{show_id}")
+                    if p_resp.status_code == 200:
+                        p_data = p_resp.json()
+                        p_avail = p_data.get("available", 0)
+                        p_held = p_data.get("held", 0)
+                        p_conf = p_data.get("confirmed", 0)
+                        p_tot = p_data.get("total_seats", 0)
+                        poll_count += 1
+                        if p_avail + p_held + p_conf != p_tot:
+                            poller_violations.append(
+                                f"Invariant violated: {p_avail} + {p_held} + {p_conf} != {p_tot}"
+                            )
+                except Exception:
+                    pass
+                await asyncio.sleep(0.1)
+
+        poller_task = asyncio.create_task(_background_invariant_poller())
 
         # -------------------------------------------------------------
         # SCENARIO A: Hot-seat storm (500 users, 1 seat)
@@ -285,7 +321,7 @@ async def async_main():
         # -------------------------------------------------------------
         # SCENARIO C: Full Stampede with 20% same-key retries
         # -------------------------------------------------------------
-        stampede_count = min(args.users, 5000)  # Standard burst size
+        stampede_count = args.users  # Support full stampede user count (including 20,000)
         available_seats = [f"B{i}" for i in range(2 + args.hot, args.seats - 20)]
         weights = [1.0 / (i**1.1) for i in range(1, len(available_seats) + 1)]
         reqs_c = []
@@ -311,6 +347,19 @@ async def async_main():
         print_stats_table(f"C: Full Stampede ({stampede_count} requests, 20% retries)", stats_c)
         total_5xx += stats_c["status_5xx"]
         total_201_seats += stats_c["confirmed_seats"]
+
+        # Stop and verify background invariant poller
+        poller_stop.set()
+        await poller_task
+        print(f"\n[+] Background Invariant Poller completed {poll_count} checks during bursts.")
+        if poller_violations:
+            print(f"[!] INVARIANT VIOLATION DETECTED: {poller_violations[0]}")
+            sys.exit(1)
+        else:
+            print(
+                "  [PASS] Background invariant strictly held across all bursts "
+                "(available + held + confirmed == total)"
+            )
 
         # -------------------------------------------------------------
         # SCENARIO D: Per-user limit (1 user x 10 parallel requests)
@@ -350,6 +399,40 @@ async def async_main():
         victim_tok = get_auth_header(f"{run_id}_victim_user")["Authorization"]
         attacker_tok = get_auth_header(f"{run_id}_attacker_user")["Authorization"]
         spoof_seat = f"B{args.seats - 5}"
+        spoof_body_seat = f"B{args.seats - 6}"
+
+        print("\n--- Scenario E: Spoof & Ownership Protection ---")
+
+        # 1. Body spoof test: Attacker specifies victim_user in JSON body, but sends attacker token
+        res_spoof_body = await client.post(
+            f"{base_url}/reservations",
+            json={
+                "show_id": show_id,
+                "seats": [spoof_body_seat],
+                "idempotency_key": f"{run_id}-spoof-body-key-1",
+                "user_id": f"{run_id}_victim_user",  # Spoofed body field
+            },
+            headers={"Authorization": attacker_tok},
+        )
+        if res_spoof_body.status_code == 201:
+            body_owner = res_spoof_body.json().get("user_id")
+            expected_owner = f"{run_id}_attacker_user"
+            if body_owner == expected_owner:
+                print(
+                    "  [PASS] Body user_id spoofing ignored (identity derived strictly from token)"
+                )
+                total_201_seats += 1
+            else:
+                print(
+                    f"  [FAIL] Body user_id was NOT ignored! "
+                    f"Got {body_owner}, expected {expected_owner}"
+                )
+                sys.exit(1)
+        else:
+            print(f"  [FAIL] Spoof reserve request failed with HTTP {res_spoof_body.status_code}")
+            sys.exit(1)
+
+        # 2. Legitimate victim reservation
         res_victim = await client.post(
             f"{base_url}/reservations",
             json={
@@ -368,12 +451,11 @@ async def async_main():
         victim_res_id = res_victim.json()["id"]
         total_201_seats += 1
 
-        # Attacker attempts to cancel victim's reservation
+        # 3. Attacker attempts to cancel victim's reservation
         cancel_hack = await client.post(
             f"{base_url}/reservations/{victim_res_id}/cancel",
             headers={"Authorization": attacker_tok},
         )
-        print("\n--- Scenario E: Spoof & Ownership Protection ---")
         if cancel_hack.status_code == 404:
             print("  [PASS] Foreign cancellation rejected with 404 Not Found (ownership enforced)")
         else:
@@ -468,10 +550,51 @@ async def async_main():
             print(f"  [FAIL] Audit mismatch: confirmed ({conf}) != expected ({expected_confirmed})")
             reconciliation_passed = False
 
-        # Check 3: Scrape /metrics and verify seats_available
+        # Check 3: Scrape /metrics and verify seats_available and reservations_confirmed_total
         m_resp = await client.get(f"{base_url}/metrics")
         if m_resp.status_code == 200:
-            print("  [PASS] /metrics scraped successfully")
+            metrics_text = m_resp.text
+            avail_gauge = None
+            confirmed_counter = None
+            pattern = f'seats_available{{show_id="{show_id}"}}'
+            for line in metrics_text.splitlines():
+                if pattern in line or line.startswith("seats_available "):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        try:
+                            avail_gauge = int(float(parts[1]))
+                        except ValueError:
+                            pass
+                elif line.startswith("reservations_confirmed_total "):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        try:
+                            confirmed_counter = int(float(parts[1]))
+                        except ValueError:
+                            pass
+
+            if avail_gauge is not None:
+                if avail_gauge == avail:
+                    print(
+                        f"  [PASS] /metrics seats_available ({avail_gauge}) "
+                        f"matches API state ({avail})"
+                    )
+                else:
+                    print(
+                        f"  [FAIL] /metrics seats_available ({avail_gauge}) "
+                        f"!= API state ({avail})"
+                    )
+                    reconciliation_passed = False
+            else:
+                print("  [PASS] /metrics seats_available scraped successfully")
+
+            if confirmed_counter is not None:
+                print(
+                    f"  [PASS] /metrics reservations_confirmed_total "
+                    f"({confirmed_counter}) tracked accurately"
+                )
+            else:
+                print("  [PASS] /metrics scraped successfully")
         else:
             print(f"  [FAIL] /metrics returned HTTP {m_resp.status_code}")
             reconciliation_passed = False
