@@ -278,5 +278,7 @@ This document records the interaction log, human directions, and agent-implement
   - Aligned [app/routes/shows.py](file:///c:/Users/abhis/Desktop/TP/paytm%20task/app/routes/shows.py#L146) to pass `show_id_str=show_id` and explicitly record `request.state.reason = "idempotent_replay"` on replays.
   - Tested local PostgreSQL instances, confirming the local test cluster on port 5433 (`postgresql://postgres:postgres@localhost:5433/testdb`) is running and initialized with all 5 tables.
   - Updated [.env](file:///c:/Users/abhis/Desktop/TP/paytm%20task/.env) with the local connection string `DATABASE_URL=postgresql://postgres:postgres@localhost:5433/testdb` and `DB_STATEMENT_CACHE_SIZE=100` for running the service and running `scripts/burst.py` locally.
-  - Verified with pytest: all tests pass (including `tests/integration/test_shows.py` and `tests/concurrency/test_mutation_canary.py`).
+  - Identified that [scripts/burst.py](file:///c:/Users/abhis/Desktop/TP/paytm%20task/scripts/burst.py) used static keys across runs; since PostgreSQL `idempotency_keys` table scopes keys to `(user_id, key)`, subsequent runs against a new show failed with `409 idempotency_key_reuse`. Prefixed benchmark keys and user IDs with a unique `run_id` to guarantee multi-run independence.
+  - Executed full 2000-user / 500-seat burst benchmark (`scripts/burst.py`): all scenarios A through F passed with zero 5xx errors and exact invariant verification.
+
 

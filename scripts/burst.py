@@ -208,6 +208,7 @@ async def async_main():
         total_5xx = 0
         total_201_seats = 0
         total_cancelled_seats = 0
+        run_id = f"b{int(time.time())}_{random.randint(1000, 9999)}"
 
         # Helper to get user auth header
         # Cache tokens to avoid flooding auth route unnecessarily
@@ -222,21 +223,21 @@ async def async_main():
         # Pre-mint a batch of tokens for common user pools
         print("Minting user auth tokens...")
         for i in range(500):
-            token_cache[f"hot_user_{i}"] = mint_token(base_url, f"hot_user_{i}")
+            token_cache[f"{run_id}_hot_{i}"] = mint_token(base_url, f"{run_id}_hot_{i}")
         for i in range(args.hot * 100):
-            token_cache[f"hotset_user_{i}"] = mint_token(base_url, f"hotset_user_{i}")
+            token_cache[f"{run_id}_hotset_{i}"] = mint_token(base_url, f"{run_id}_hotset_{i}")
 
         # -------------------------------------------------------------
         # SCENARIO A: Hot-seat storm (500 users, 1 seat)
         # -------------------------------------------------------------
         reqs_a = []
         for i in range(500):
-            uid = f"hot_user_{i}"
+            uid = f"{run_id}_hot_{i}"
             reqs_a.append(
                 (
                     "POST",
                     f"{base_url}/reservations",
-                    {"show_id": show_id, "seats": ["B1"], "idempotency_key": f"key-a-{i}"},
+                    {"show_id": show_id, "seats": ["B1"], "idempotency_key": f"{run_id}-a-{i}"},
                     get_auth_header(uid),
                 )
             )
@@ -258,13 +259,17 @@ async def async_main():
         hot_seats = [f"B{i}" for i in range(2, 2 + args.hot)]
         reqs_b = []
         for i in range(1000):
-            uid = f"hotset_user_{i}"
+            uid = f"{run_id}_hotset_{i}"
             chosen_seat = random.choice(hot_seats)
             reqs_b.append(
                 (
                     "POST",
                     f"{base_url}/reservations",
-                    {"show_id": show_id, "seats": [chosen_seat], "idempotency_key": f"key-b-{i}"},
+                    {
+                        "show_id": show_id,
+                        "seats": [chosen_seat],
+                        "idempotency_key": f"{run_id}-b-{i}",
+                    },
                     get_auth_header(uid),
                 )
             )
@@ -285,14 +290,14 @@ async def async_main():
             if prev_req and (i % 5 == 0):
                 reqs_c.append(prev_req)
             else:
-                uid = f"stampede_{i}"
+                uid = f"{run_id}_stampede_{i}"
                 if uid not in token_cache:
-                    token_cache[uid] = mint_token(uid)
+                    token_cache[uid] = mint_token(base_url, uid)
                 st = random.choices(available_seats, weights=weights, k=1)[0]
                 item = (
                     "POST",
                     f"{base_url}/reservations",
-                    {"show_id": show_id, "seats": [st], "idempotency_key": f"key-c-{i}"},
+                    {"show_id": show_id, "seats": [st], "idempotency_key": f"{run_id}-c-{i}"},
                     get_auth_header(uid),
                 )
                 reqs_c.append(item)
@@ -306,8 +311,8 @@ async def async_main():
         # -------------------------------------------------------------
         # SCENARIO D: Per-user limit (1 user x 10 parallel requests)
         # -------------------------------------------------------------
-        quota_user = "quota_burst_user"
-        token_cache[quota_user] = mint_token(quota_user)
+        quota_user = f"{run_id}_quota_burst_user"
+        token_cache[quota_user] = mint_token(base_url, quota_user)
         free_seats_d = [f"B{i}" for i in range(args.seats - 20, args.seats - 10)]
         reqs_d = []
         for i in range(10):
@@ -318,7 +323,7 @@ async def async_main():
                     {
                         "show_id": show_id,
                         "seats": [free_seats_d[i]],
-                        "idempotency_key": f"key-d-{i}",
+                        "idempotency_key": f"{run_id}-d-{i}",
                     },
                     get_auth_header(quota_user),
                 )
@@ -338,19 +343,24 @@ async def async_main():
         # -------------------------------------------------------------
         # SCENARIO E: Spoof Test (body user_id spoofed; cancel foreign reservation)
         # -------------------------------------------------------------
-        victim_tok = get_auth_header("victim_user")["Authorization"]
-        attacker_tok = get_auth_header("attacker_user")["Authorization"]
+        victim_tok = get_auth_header(f"{run_id}_victim_user")["Authorization"]
+        attacker_tok = get_auth_header(f"{run_id}_attacker_user")["Authorization"]
         spoof_seat = f"B{args.seats - 5}"
         res_victim = await client.post(
             f"{base_url}/reservations",
             json={
                 "show_id": show_id,
                 "seats": [spoof_seat],
-                "idempotency_key": "victim-key-1",
+                "idempotency_key": f"{run_id}-victim-key-1",
             },
             headers={"Authorization": victim_tok},
         )
-        assert res_victim.status_code == 201
+        if res_victim.status_code != 201:
+            print(
+                f"[!] SCENARIO E FAILED: Victim booking returned {res_victim.status_code}\n"
+                f"{res_victim.text}"
+            )
+            sys.exit(1)
         victim_res_id = res_victim.json()["id"]
         total_201_seats += 1
 
@@ -378,11 +388,16 @@ async def async_main():
             json={
                 "show_id": show_id,
                 "seats": [race_seat],
-                "idempotency_key": "race-key-init",
+                "idempotency_key": f"{run_id}-race-key-init",
             },
             headers={"Authorization": victim_tok},
         )
-        assert race_res.status_code == 201
+        if race_res.status_code != 201:
+            print(
+                f"[!] SCENARIO F FAILED: Race initial booking returned {race_res.status_code}\n"
+                f"{race_res.text}"
+            )
+            sys.exit(1)
         race_res_id = race_res.json()["id"]
         total_201_seats += 1
 
@@ -400,9 +415,9 @@ async def async_main():
                 {
                     "show_id": show_id,
                     "seats": [race_seat],
-                    "idempotency_key": f"key-f-contend-{i}",
+                    "idempotency_key": f"{run_id}-f-contend-{i}",
                 },
-                get_auth_header(f"contender_f_{i}"),
+                get_auth_header(f"{run_id}_contender_f_{i}"),
             )
             for i in range(50)
         ]
