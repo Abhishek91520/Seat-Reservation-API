@@ -42,3 +42,17 @@ async def metrics():
         pass
     body, content_type = get_metrics_output()
     return Response(content=body, media_type=content_type)
+
+
+@router.get("/logs")
+async def logs(limit: int = 50):
+    """Public structured log viewer returning recent JSON request logs with correlation IDs."""
+    from app.logging import get_recent_logs, recent_logs
+
+    safe_limit = max(1, min(limit, 200))
+    return {
+        "total_buffered": len(recent_logs),
+        "count": len(get_recent_logs(safe_limit)),
+        "logs": get_recent_logs(safe_limit),
+    }
+

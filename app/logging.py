@@ -1,6 +1,8 @@
+import datetime
 import logging
 import sys
 import uuid
+from collections import deque
 from contextvars import ContextVar
 from typing import Optional
 
@@ -45,3 +47,22 @@ def setup_logging():
         stream=sys.stdout,
         level=logging.INFO,
     )
+
+
+# In-memory circular buffer for public log access
+recent_logs: deque = deque(maxlen=200)
+
+
+def record_log_event(event_dict: dict) -> None:
+    entry = {
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        **event_dict,
+    }
+    recent_logs.append(entry)
+
+
+def get_recent_logs(limit: int = 50) -> list:
+    logs = list(recent_logs)
+    logs.reverse()
+    return logs[:limit]
+

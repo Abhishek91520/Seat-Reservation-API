@@ -16,6 +16,7 @@ from app.errors import (
 )
 from app.logging import (
     reason_var,
+    record_log_event,
     request_id_var,
     seats_var,
     setup_logging,
@@ -129,6 +130,7 @@ async def logging_and_metrics_middleware(request: Request, call_next) -> Respons
             log_data["reason"] = reason
 
         logger.info("http_request", **log_data)
+        record_log_event(log_data)
 
 
 # Register routes
