@@ -19,5 +19,8 @@ services:
         value: "15"
       - key: DB_STATEMENT_CACHE_SIZE
         value: "100"
+      - key: SHOW_STATE_CACHE_MS
+        value: "500"
       - key: ENVIRONMENT
         value: "production"
+
