@@ -100,11 +100,14 @@ async def connect_with_backoff(max_wait_seconds: float = 60.0) -> asyncpg.Pool:
                 except Exception:
                     pass
             last_error = e
-            logger.warning(
-                "db_connect_failed_retrying",
-                error=str(e),
-                backoff=backoff,
-            )
+            err_msg = str(e)
+            log_kwargs = {"error": err_msg, "backoff": backoff}
+            if "101" in err_msg or "unreachable" in err_msg.lower():
+                log_kwargs["hint"] = (
+                    "Render does not support IPv6 routing. Use Supabase pooler host "
+                    "(aws-0-*.pooler.supabase.com:6543) instead of direct host db.*.supabase.co"
+                )
+            logger.warning("db_connect_failed_retrying", **log_kwargs)
             await asyncio.sleep(backoff)
             backoff = min(backoff * 1.5, 5.0)
 
@@ -161,7 +164,7 @@ async def close_db() -> None:
 
 
 async def check_db_ready() -> bool:
-    global pool, db_semaphore, is_db_connected
+    global pool, db_semaphore, is_db_connected, reserved_ready_conn
     if pool is None or getattr(pool, "_closed", False):
         try:
             pool = await connect_with_backoff(max_wait_seconds=3.0)
@@ -182,6 +185,12 @@ async def check_db_ready() -> bool:
         return res == 1
     except Exception as e:
         logger.warning("readyz_check_failed", error=str(e))
+        if reserved_ready_conn is not None:
+            try:
+                await reserved_ready_conn.close()
+            except Exception:
+                pass
+            reserved_ready_conn = None
         # Fallback to borrowing an idle connection from pool if reserved conn slot was unavailable
         if pool is not None and not getattr(pool, "_closed", False):
             try:

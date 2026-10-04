@@ -46,6 +46,18 @@ class Settings(BaseSettings):
         url = self.database_url
         if url.startswith("postgres://"):
             url = "postgresql://" + url[len("postgres://") :]
+        # Auto-normalize IPv6-only direct Supabase host to IPv4 Supavisor pooler
+        # to prevent Linux '[Errno 101] Network is unreachable' on IPv4 platforms (Render)
+        direct_host = "db.ucqugbwkvwurxbtwlrmi.supabase.co"
+        pooler_host = "aws-0-ap-northeast-2.pooler.supabase.com:6543"
+        if direct_host in url:
+            url = url.replace(f"{direct_host}:5432", pooler_host)
+            url = url.replace(direct_host, pooler_host)
+            if "postgres.ucqugbwkvwurxbtwlrmi" not in url and "postgres:" in url:
+                url = url.replace("postgres:", "postgres.ucqugbwkvwurxbtwlrmi:", 1)
+            if "sslmode=require" not in url and "ssl=" not in url:
+                separator = "&" if "?" in url else "?"
+                url = f"{url}{separator}sslmode=require"
         return url
 
     @property
