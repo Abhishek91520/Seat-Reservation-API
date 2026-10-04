@@ -234,6 +234,13 @@ This document records the interaction log, human directions, and agent-implement
     - 4 visual screenshots captured in `docs/screenshots/` with zero layout defects.
     - Live burst under active browser polling completed with 0 x 5xx and 100% invariant passes.
 
+### Maintenance: Type Annotation Fix in DB Transaction Helper
+- **Human Input**: Reported IDE type checking error: `Type AsyncGenerator[T] is not awaitable @[app/db.py:L220]`.
+- **Agent Actions**:
+  - Investigated `app/db.py`: identified that `execute_in_transaction_with_retry` erroneously typed `operation` as returning `AsyncGenerator[T, None] | asyncio.Future[T]`.
+  - Replaced the parameter return type annotation with `Awaitable[T]` (imported from `typing`), matching both coroutines (`async def`) and futures while satisfying the `await operation(conn)` call.
+  - Verified with `ruff check app/db.py` and unit tests (all passed).
+
 
 
 

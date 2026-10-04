@@ -2,7 +2,7 @@ import asyncio
 import os
 import random
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Callable, Optional, TypeVar
+from typing import AsyncGenerator, Awaitable, Callable, Optional, TypeVar
 
 import asyncpg
 import structlog
@@ -199,7 +199,7 @@ async def db_connection() -> AsyncGenerator[asyncpg.Connection, None]:
 
 
 async def execute_in_transaction_with_retry(
-    operation: Callable[[asyncpg.Connection], AsyncGenerator[T, None] | asyncio.Future[T]],
+    operation: Callable[[asyncpg.Connection], Awaitable[T]],
     max_retries: int = 3,
 ) -> T:
     last_error: Optional[Exception] = None
