@@ -161,11 +161,17 @@ async def close_db() -> None:
 
 
 async def check_db_ready() -> bool:
-    global pool, is_db_connected
+    global pool, db_semaphore, is_db_connected
     if pool is None or getattr(pool, "_closed", False):
         try:
             pool = await connect_with_backoff(max_wait_seconds=3.0)
             is_db_connected = True
+            if db_semaphore is None:
+                effective_max = settings.effective_pool_size
+                if settings.ssl_required:
+                    effective_max = min(effective_max, 6)
+                sem_size = min(settings.effective_semaphore_size, effective_max)
+                db_semaphore = asyncio.Semaphore(sem_size)
             async with pool.acquire() as conn:
                 await run_migrations(conn)
         except Exception:
