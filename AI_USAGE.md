@@ -82,3 +82,25 @@ This document records the interaction log, human directions, and agent-implement
     - Ruff check & format: 100% clean.
     - Pytest: 25 passed in 10.32s across all test suites.
     - TOCTOU windows mathematically proven eliminated via row locks and conditional DML.
+
+### Phase 4: Concurrency Test Suite & Mutation Canary
+- **Human Input**: Directed to proceed with Phase 4 implementation and full verification.
+- **Agent Actions**:
+  - Implemented `tests/concurrency/helpers.py`:
+    - `create_concurrency_show`: helper creating arbitrary-sized shows for concurrency bursts.
+    - `background_invariant_poller`: async context manager polling `GET /shows/{id}` every 50ms during bursts, verifying `available + held + confirmed == total_seats` at all intermediate states.
+  - Implemented full concurrency scenarios in `tests/concurrency/`:
+    - `test_hot_seat.py`: 500 distinct users competing for 1 seat (20 iterations = 10,000 requests), exactly 1 x 201 and 499 x 409 `seat_taken`, zero 5xx. Plus hot set (2,000 users competing for 10 seats, 20 iterations = 40,000 requests), exactly 10 winners and 1990 409s.
+    - `test_multi_seat_order.py`: 200 pairs of opposing order requests (`[A1, A2]` vs `[A2, A1]`), deadlock-free, consistent winners (all-or-nothing, never split).
+    - `test_quota_race.py`: 1 user issuing 10 parallel reservation requests with limit 4, resulting in exactly 4 x 201 and 6 x 409 `per_user_limit`.
+    - `test_idempotency_race.py`: 100 parallel requests with identical key/body yielding exactly 1 x 201 and 99 x 200 replays; conflicting bodies with same key yielding exactly 1 winner and 1 409.
+    - `test_cancel_rebook_race.py`: 1 holder cancels while 100 users contend for the seat (at most 1 winner); parallel double cancels (one real release, zero quota underflow).
+    - `test_pool_exhaustion.py`: test client queueing 1,000 concurrent requests with pool=2 and semaphore=2, verifying zero 5xx errors and zero 429 under bounded wait.
+    - `test_stampede.py`: 20,000 requests through client semaphore 500, 1,000 seats with Zipf distribution and 20% retries, zero 5xx, confirmed seats strictly equal sum of 201s' seat counts.
+    - `test_mutation_canary.py` (`@pytest.mark.canary`): intentionally replaced `FOR UPDATE` seat query with plain `SELECT` without row lock, proving that race conditions occur and that the concurrency test suite reliably detects double-bookings.
+  - Updated `tests/conftest.py` with per-test table truncation ensuring complete isolation across test runs.
+  - Validation Gate:
+    - Ruff check & format: 100% clean.
+    - Concurrency test suite: 10/10 concurrency tests passed (including 20,000-request stampede).
+    - Canary test: passed canary check (mutation confirmed to produce double-booking failure).
+    - Unit and integration tests: 25 passed in 12.16s.

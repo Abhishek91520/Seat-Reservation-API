@@ -42,6 +42,10 @@ def db_pool():
 @pytest.fixture(autouse=True)
 async def manage_app_lifecycle():
     await init_db()
+    async with db_connection() as conn:
+        await conn.execute(
+            "TRUNCATE shows, seats, reservations, user_show_quota, idempotency_keys CASCADE;"
+        )
     yield
     await close_db()
 
