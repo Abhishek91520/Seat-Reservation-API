@@ -150,3 +150,32 @@ This document records the interaction log, human directions, and agent-implement
     - Ruff lint and format: 100% clean.
     - Chaos test suite: 6/6 passed in 20.13s.
     - Performance numbers recorded in `docs/perf-notes.md`.
+
+### Phase 7: Burst Benchmark, Fuzzer, and Reconciliation Scripts
+- **Human Input**: Directed to implement Prompt 7 (Burst script with Scenarios A-F, standalone reconciliation script, and randomized fuzzer).
+- **Agent Actions**:
+  - Implemented `scripts/reconcile.py`:
+    - Scrapes `/shows/{id}` and `/metrics`.
+    - Mathematically validates `available + held + confirmed == total_seats`.
+    - Cross-checks status breakdown against individual seat map entries.
+    - Reconciles API counts with Prometheus gauges (`seats_available`, `seats_confirmed`, `seats_held`).
+    - Exits 0 on complete consistency, 1 on any discrepancy.
+  - Implemented `scripts/burst.py`:
+    - Configured with command-line arguments (`--seats`, `--users`, `--hot`, `--concurrency`).
+    - Scenario A (Hot-Seat Storm): 500 contenders, 1 seat -> exactly 1 x 201, 499 x 409, 0 x 5xx.
+    - Scenario B (Hot-Set): 1,000 contenders, 10 seats -> exactly 10 x 201, 990 x 409, 0 x 5xx.
+    - Scenario C (Full Stampede): 2,000 requests with Zipf distribution and 20% retries -> zero 5xx.
+    - Scenario D (Per-User Limit Race): 1 user issuing 10 parallel reservation requests with limit 4 -> exactly 4 x 201, 6 x 409.
+    - Scenario E (Spoofing & Ownership Protection): foreign cancellation returns 404, user body spoofing ignored.
+    - Scenario F (Cancel / Rebook Race): 1 cancel vs 50 contenders -> exactly 1 new winner, 0 x 5xx.
+    - Latency percentile calculation (p50, p95, p99, max) and response code distributions per scenario.
+    - Auto-triggers final reconciliation and exits non-zero on any 5xx or invariant violation.
+  - Implemented `scripts/fuzz.py`:
+    - Spawns concurrent asynchronous users executing randomized API calls (reserve, cancel, re-reserve, quota races) over duration windows.
+    - Tracks outcome distribution, validates zero 5xx errors, and executes `reconcile.py` at completion.
+  - Validation Gate:
+    - Ruff lint and format: 100% clean across all scripts.
+    - Live `burst.py` execution against running server: Scenarios A-F passed, 0 x 5xx, final reconciliation passed.
+    - Live `fuzz.py` execution (12s, 20 workers): 821 operations completed with 0 x 5xx, reconciliation passed.
+    - Standalone `reconcile.py` executed across all database shows with 100% invariant passes.
+
