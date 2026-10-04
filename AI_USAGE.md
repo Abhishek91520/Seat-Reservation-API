@@ -35,3 +35,18 @@ This document records the interaction log, human directions, and agent-implement
     - Ruff check & format: 100% passed with 0 errors.
     - Pytest: 4 passed in 1.81s.
     - Live server check: `GET /healthz` -> 200, `GET /readyz` -> 200, `GET /metrics` -> 200.
+
+### Phase 2: Auth, Shows, State, plus Invariant Checker
+- **Human Input**: Directed to proceed with Phase 2 implementation.
+- **Agent Actions**:
+  - Implemented `POST /auth/token` with strict validation, generating signed HS256 JWTs (`sub=user_id`, `role=user`).
+  - Implemented JWT authentication and authorization dependencies (`get_current_user_id` and `verify_admin_auth`).
+  - Implemented `POST /shows`: bulk inserting seats via PostgreSQL `unnest`, rejecting empty labels, duplicates, invalid limits, and float prices (`price_paise` strictly integer).
+  - Implemented `GET /shows/{id}`: single-statement snapshot extracting metadata, status counts (`available`, `held`, `confirmed`), and seat statuses as a JSON object while updating Prometheus gauges.
+  - Implemented comprehensive `tests/invariants.py`: verifying all 6 invariants directly in SQL (`total_seats` consistency, confirmed seat ownership, single-user consistency, no duplicate confirmed seats across reservations, exact quota synchronization, and idempotency key references).
+  - Auth test suite (`tests/unit/test_auth.py`): testing token creation, validation, expired token rejection, missing token (401), unauthorized user on admin route (403), and valid admin authentication.
+  - Shows test suite (`tests/integration/test_shows.py`): testing fresh show creation, state retrieval, validation rules, 404 for nonexistent/malformed IDs, and execution of `assert_invariants`.
+  - Validation Gate:
+    - Ruff check & format: 100% clean.
+    - Pytest: 17 passed in 7.64s across all unit and integration tests.
+    - Invariant checker verified on fresh show.

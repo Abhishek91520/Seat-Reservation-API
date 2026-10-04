@@ -157,11 +157,19 @@ async def validation_exception_handler(
         f"{'.'.join(str(loc) for loc in err['loc'])}: {err['msg']}" for err in exc.errors()
     ]
     combined_message = "; ".join(error_messages) if error_messages else "Request validation failed"
+    sanitized_errors = [
+        {
+            "loc": list(err.get("loc", [])),
+            "msg": str(err.get("msg", "")),
+            "type": str(err.get("type", "")),
+        }
+        for err in exc.errors()
+    ]
     content = format_error_response(
         code="validation_error",
         message=combined_message,
         request_id=request_id,
-        details={"validation_errors": exc.errors()},
+        details={"validation_errors": sanitized_errors},
     )
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

@@ -94,16 +94,20 @@ async def assert_invariants(conn: asyncpg.Connection, show_id: str) -> None:
             FROM seats
             WHERE show_id = $1 AND status = 'confirmed'
             GROUP BY user_id
+        ),
+        show_quotas AS (
+            SELECT user_id, held
+            FROM user_show_quota
+            WHERE show_id = $1
         )
         SELECT
             COALESCE(q.user_id, a.user_id) AS user_id,
             COALESCE(q.held, 0) AS quota_held,
             COALESCE(a.actual_held, 0) AS actual_held
-        FROM user_show_quota q
-        FULL OUTER JOIN actual_user_seats a ON q.user_id = a.user_id AND q.show_id = $1
-        WHERE q.show_id = $1 OR a.user_id IS NOT NULL
-        HAVING COALESCE(q.held, 0) != COALESCE(a.actual_held, 0)
-            OR COALESCE(q.held, 0) > $2
+        FROM show_quotas q
+        FULL OUTER JOIN actual_user_seats a ON q.user_id = a.user_id
+        WHERE COALESCE(q.held, 0) != COALESCE(a.actual_held, 0)
+           OR COALESCE(q.held, 0) > $2
         """,
         show_id,
         per_user_limit,

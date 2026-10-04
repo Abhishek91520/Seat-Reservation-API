@@ -1,11 +1,10 @@
 import os
 
-import asyncpg
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.config import settings
-from app.db import close_db, init_db, run_migrations
+from app.db import close_db, db_connection, init_db
 from app.main import app
 
 # Ensure test DB is targeted
@@ -27,19 +26,17 @@ def setup_test_env():
     settings.admin_token = "test-admin-secret-token"
 
 
-@pytest.fixture(scope="session")
-async def db_pool():
-    # Setup test database and run migrations
-    p = await asyncpg.create_pool(
-        dsn=TEST_DB_URL,
-        min_size=2,
-        max_size=10,
-        statement_cache_size=settings.db_statement_cache_size,
-    )
-    async with p.acquire() as conn:
-        await run_migrations(conn)
-    yield p
-    await p.close()
+@pytest.fixture
+async def db_conn():
+    async with db_connection() as conn:
+        yield conn
+
+
+@pytest.fixture
+def db_pool():
+    import app.db as db_module
+
+    return db_module.pool
 
 
 @pytest.fixture(autouse=True)

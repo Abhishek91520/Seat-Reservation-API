@@ -6,6 +6,7 @@ from fastapi import Header
 
 from app.config import settings
 from app.errors import ForbiddenException, UnauthorizedException
+from app.logging import user_id_var
 
 
 def create_user_token(user_id: str, expires_delta: Optional[timedelta] = None) -> str:
@@ -41,7 +42,9 @@ def get_current_user_id(authorization: Optional[str] = Header(None)) -> str:
         user_id = payload.get("sub")
         if not user_id:
             raise UnauthorizedException("Token payload missing subject ('sub')")
-        return str(user_id)
+        user_id_str = str(user_id)
+        user_id_var.set(user_id_str)
+        return user_id_str
     except jwt.ExpiredSignatureError as err:
         raise UnauthorizedException("Token has expired") from err
     except jwt.InvalidTokenError as err:
