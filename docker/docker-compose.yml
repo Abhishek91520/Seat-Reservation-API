@@ -1,0 +1,50 @@
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: seat-reservation-api:latest
+    container_name: seat_reservation_app
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/seat_reservation
+      - PORT=8000
+      - HOST=0.0.0.0
+      - JWT_SECRET=seat-reservation-dev-secret-change-in-prod
+      - ADMIN_TOKEN=admin-secret-token
+      - DB_POOL_MIN_SIZE=15
+      - DB_POOL_MAX_SIZE=15
+      - DB_SEMAPHORE_SIZE=15
+      - DB_STATEMENT_CACHE_SIZE=100
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: seat_reservation_postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: seat_reservation
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d seat_reservation"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

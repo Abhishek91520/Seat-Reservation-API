@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: seat-reservation-api
+    runtime: docker
+    region: singapore
+    plan: starter # Starter plan ($7/mo) avoids free-tier 15-minute spin-down and provides 0.5 CPU / 512MB RAM
+    # plan: free # Alternative free tier: spins down after 15m inactivity; use keep-alive on /readyz
+    healthCheckPath: /readyz
+    autoDeploy: true
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: ADMIN_TOKEN
+        sync: false
+      - key: DB_POOL_SIZE
+        value: "15"
+      - key: DB_STATEMENT_CACHE_SIZE
+        value: "100"
+      - key: ENVIRONMENT
+        value: "production"
