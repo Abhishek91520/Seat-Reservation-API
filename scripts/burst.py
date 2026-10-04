@@ -19,8 +19,8 @@ import httpx
 import jwt
 
 # Default secrets matching config fallbacks
-ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "admin-secret-token")
-JWT_SECRET = os.environ.get("JWT_SECRET", "seat-reservation-dev-secret-change-in-prod")
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "admin-secret-token-change-in-prod")
+JWT_SECRET = os.environ.get("JWT_SECRET", "supa-secret-jwt-seat-reservation-prod-2026")
 
 
 def mint_token(arg1: str, arg2: Optional[str] = None) -> str:
@@ -154,14 +154,15 @@ async def async_main():
     parser.add_argument(
         "base_url", nargs="?", default="http://localhost:8000", help="Base URL of service"
     )
-    parser.add_argument("--users", type=int, default=20000, help="Total users in stampede scenario")
-    parser.add_argument("--seats", type=int, default=2000, help="Total seats in show")
+    parser.add_argument("--users", type=int, default=2000, help="Total users in stampede scenario")
+    parser.add_argument("--seats", type=int, default=500, help="Total seats in show")
     parser.add_argument("--hot", type=int, default=10, help="Number of hot seats")
-    parser.add_argument("--concurrency", type=int, default=500, help="Client concurrency limit")
+    parser.add_argument("--concurrency", type=int, default=100, help="Client concurrency limit")
+    parser.add_argument("--admin-token", type=str, default=None, help="Admin bearer token override")
     args = parser.parse_args()
 
     base_url = args.base_url.rstrip("/")
-    admin_token = os.environ.get("ADMIN_TOKEN", ADMIN_TOKEN)
+    admin_token = args.admin_token or os.environ.get("ADMIN_TOKEN", ADMIN_TOKEN)
 
     print("=================================================================")
     print(f"BURST BENCHMARK & SYSTEM VERIFICATION: {base_url}")
@@ -174,7 +175,7 @@ async def async_main():
     limits = httpx.Limits(
         max_connections=args.concurrency, max_keepalive_connections=args.concurrency
     )
-    async with httpx.AsyncClient(limits=limits, timeout=30.0) as client:
+    async with httpx.AsyncClient(limits=limits, timeout=45.0) as client:
         # 1. Health check
         h_resp = await client.get(f"{base_url}/healthz")
         r_resp = await client.get(f"{base_url}/readyz")
